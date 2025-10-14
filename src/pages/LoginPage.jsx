@@ -152,8 +152,8 @@ const RegistrationSystem = () => {
       const result = await register(regForm);
       if (result.success) {
         setVerificationEmail(regForm.email);
-        // Send code using new backend
-        await axios.post('http://localhost:5000/send-code', { email: regForm.email });
+        // Send code via Vite dev API route
+        await axios.post('/api/send-code', { email: regForm.email });
         setShowCodeForm(true);
         setTimeRemaining(120); // 120 seconds expiry
         setTimerActive(true);
@@ -176,7 +176,7 @@ const RegistrationSystem = () => {
     setVerificationCode('');
     try {
       const email = verificationEmail || regForm.email;
-      await axios.post('http://localhost:5000/send-code', { email });
+      await axios.post('/api/send-code', { email });
       setResendMessage('Verification code sent successfully. Please check your inbox.');
       setShowCodeForm(true);
       setTimeRemaining(120);
@@ -195,8 +195,8 @@ const RegistrationSystem = () => {
     setVerifyCodeSuccess('');
     try {
       const email = verificationEmail || regForm.email;
-      // Verify code using new backend
-      const response = await axios.post('http://localhost:5000/verify-code', { email, code: verificationCode });
+      // Verify code via Vite dev API route
+      const response = await axios.post('/api/verify-code', { email, code: verificationCode });
       if (response.data.success) {
         setVerifyCodeSuccess('Email verified successfully!');
         setVerificationCode('');

@@ -21,7 +21,7 @@ const Sidebar = ({ collapsed, onToggle, mobileOpen, onMobileClose }) => {
   // Define all menu items
   const allMenuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', roles: ['admin', 'employee'] },
-    { icon: Package, label: 'Assets', path: '/assets-managment', roles: ['admin', 'employee'] },
+    { icon: Package, label: 'Assets', path: '/assets', roles: ['admin', 'employee'] },
     { icon: Shield, label: 'Credentials', path: '/credentials', roles: ['admin'] },
     { icon: Ticket, label: 'Tickets', path: '/tickets', roles: ['admin', 'employee'] },
     { icon: Users, label: 'Users', path: '/users', roles: ['admin'] },

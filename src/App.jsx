@@ -185,7 +185,7 @@ function App() {
       />
       
       <Route 
-        path="/assets" 
+        path="/assets-managment" 
         element={
           <ProtectedRoute>
             <Layout>
@@ -196,7 +196,7 @@ function App() {
       />
       
       <Route 
-        path="/assets/new" 
+        path="/assets-managment/new" 
         element={
           <ProtectedRoute requiredRole="admin">
             <Layout>
@@ -207,7 +207,7 @@ function App() {
       />
       
       <Route 
-        path="/assets/edit/:assetId" 
+        path="/assets-managment/edit/:assetId" 
         element={
           <ProtectedRoute requiredRole="admin">
             <Layout>

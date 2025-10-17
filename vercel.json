@@ -5,28 +5,14 @@
         "destination": "/api/:path*"
       },
       {
-        "source": "/((?!api).*)",
+        "source": "/(.*)",
         "destination": "/index.html"
       }
     ],
-    "headers": [
+    "routes": [
       {
-        "source": "/(.*).js",
-        "headers": [
-          {
-            "key": "Content-Type",
-            "value": "application/javascript"
-          }
-        ]
-      },
-      {
-        "source": "/(.*).css",
-        "headers": [
-          {
-            "key": "Content-Type",
-            "value": "text/css"
-          }
-        ]
+        "src": "/assets-managment/(.*)",
+        "dest": "/assets-managment/$1"
       }
     ]
   }

@@ -126,7 +126,7 @@ const AssetForm = () => {
       } else {
         await assetService.createAsset(asset);
       }
-      navigate('/assets');
+      navigate('/assets-managment');
     } catch (err) {
       setError(err.message);
     } finally {

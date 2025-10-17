@@ -104,7 +104,7 @@ const AssetsPage = () => {
 
   // Navigate to the asset form page
   const goToAddAssetPage = () => {
-    navigate('/assets-management/new');
+    navigate('/assets/new');
   };
 
   // Handle asset deletion
@@ -637,7 +637,7 @@ const AssetsPage = () => {
                             <>
                               <button 
                                 className="p-2 rounded-lg glass-morphism-hover text-slate-400 hover:text-green-400 transition-colors hover:scale-110"
-                                onClick={() => navigate(`/assets-management/edit/${asset.id}`)}
+                                onClick={() => navigate(`/assets/edit/${asset.id}`)}
                                 title="Edit Asset"
                               >
                                 <Edit className="w-4 h-4" />

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { 
   Package, 
   Users, 
@@ -10,7 +10,8 @@ import {
   AlertTriangle,
   Clock,
   BarChart3,
-  XCircle
+  XCircle,
+  ChevronRight
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { useAuth } from '../contexts/AuthContext';
@@ -18,9 +19,13 @@ import { assetService } from '../services/assetService';
 import { userService } from '../services/userService';
 import { ticketService } from '../services/ticketService';
 import { credentialService } from '../services/credentialService';
+import vpsService from '../services/vpsService';
+import subscriptionService from '../services/subscriptionService';
+import PaymentCalendar, { expandDueDates, findPaymentForMonth } from '../components/PaymentCalendar';
 
 const Dashboard = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [showAccessDenied, setShowAccessDenied] = useState(false);
   const [accessDeniedMessage, setAccessDeniedMessage] = useState('');
@@ -38,6 +43,83 @@ const Dashboard = () => {
   const [error, setError] = useState('');
   const [ticketStatusData, setTicketStatusData] = useState([]);
   const [solvedTicketCount, setSolvedTicketCount] = useState(0);
+  const [vpsList, setVpsList] = useState([]);
+  const [subscriptionsList, setSubscriptionsList] = useState([]);
+  const [viewedMonth, setViewedMonth] = useState(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() };
+  });
+
+  // Combined feed fed into PaymentCalendar — both sources, same shape.
+  const calendarItems = useMemo(() => [
+    ...vpsList.map((v) => ({ ...v, kind: 'vps' })),
+    ...subscriptionsList.map((s) => ({ ...s, kind: 'subscription' })),
+  ], [vpsList, subscriptionsList]);
+
+  const formatCurrency = (value, currency = 'USD') =>
+    new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(Number(value) || 0);
+
+  const totalsByCurrency = useMemo(() => {
+    const { year, month } = viewedMonth;
+    const map = new Map();
+    for (const item of calendarItems) {
+      const dueDates = expandDueDates(item, year);
+      const billsThisMonth = dueDates.some((d) => d.getFullYear() === year && d.getMonth() === month);
+      if (!billsThisMonth) continue;
+      const cur = item.currency || 'USD';
+      map.set(cur, (map.get(cur) || 0) + (Number(item.monthlyCost) || 0));
+    }
+    return Array.from(map.entries()).map(([currency, amount]) => ({ currency, amount }));
+  }, [calendarItems, viewedMonth]);
+
+  const viewedMonthTotals = useMemo(() => {
+    const { year, month } = viewedMonth;
+    const paid = new Map();
+    const due = new Map();
+    let count = 0;
+    for (const item of calendarItems) {
+      const dueDates = expandDueDates(item, year);
+      const dueThisMonth = dueDates.find((d) => d.getFullYear() === year && d.getMonth() === month);
+      if (!dueThisMonth) continue;
+      count += 1;
+      const cur = item.currency || 'USD';
+      const amount = Number(item.monthlyCost) || 0;
+      const payment = findPaymentForMonth(item, dueThisMonth);
+      if (payment) {
+        paid.set(cur, (paid.get(cur) || 0) + (Number(payment.amount ?? amount) || 0));
+      } else {
+        due.set(cur, (due.get(cur) || 0) + amount);
+      }
+    }
+    return {
+      count,
+      paid: Array.from(paid.entries()).map(([currency, amount]) => ({ currency, amount })),
+      due: Array.from(due.entries()).map(([currency, amount]) => ({ currency, amount })),
+    };
+  }, [calendarItems, viewedMonth]);
+
+  const viewedMonthLabel = useMemo(
+    () => new Date(viewedMonth.year, viewedMonth.month, 1).toLocaleString('default', { month: 'long', year: 'numeric' }),
+    [viewedMonth]
+  );
+  const isViewingCurrentMonth =
+    viewedMonth.year === new Date().getFullYear() && viewedMonth.month === new Date().getMonth();
+
+  const loadVpsForCalendar = async () => {
+    const result = await vpsService.getAllVps();
+    if (result.success) setVpsList(result.vps || []);
+  };
+
+  const loadSubscriptionsForCalendar = async () => {
+    const result = await subscriptionService.getAllSubscriptions();
+    if (result.success) setSubscriptionsList(result.subscriptions || []);
+  };
+
+  useEffect(() => {
+    loadVpsForCalendar();
+    loadSubscriptionsForCalendar();
+  }, []);
+
 
   // Add a metric for non-admins: My Assets
   const myAssetsMetric = {
@@ -128,12 +210,12 @@ const Dashboard = () => {
         // Tickets
         const ticketsRes = isAdmin ? await ticketService.getAllTickets() : await ticketService.getUserTickets();
         let ticketActs = [];
-        if (ticketsRes.success) {
-          setOpenTicketCount(ticketsRes.tickets.filter(t => t.status === 'open').length);
-          setSolvedTicketCount(ticketsRes.tickets.filter(t => t.status === 'resolved').length);
+        if (ticketsRes.success && ticketsRes.tickets) {
+          setOpenTicketCount((ticketsRes.tickets || []).filter(t => t.status === 'open').length);
+          setSolvedTicketCount((ticketsRes.tickets || []).filter(t => t.status === 'resolved').length);
           // Ticket status breakdown for chart
           const tStatusMap = {};
-          ticketsRes.tickets.forEach(ticket => {
+          (ticketsRes.tickets || []).forEach(ticket => {
             tStatusMap[ticket.status] = (tStatusMap[ticket.status] || 0) + 1;
           });
           const tStatusColors = {
@@ -143,7 +225,7 @@ const Dashboard = () => {
             closed: '#ef4444',
           };
           setTicketStatusData(Object.entries(tStatusMap).map(([name, value]) => ({ name: name.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), value, color: tStatusColors[name] || '#6b7280' })));
-          ticketActs = ticketsRes.tickets.slice(0, 10).map(t => ({
+          ticketActs = (ticketsRes.tickets || []).slice(0, 10).map(t => ({
             type: 'ticket',
             action: 'Ticket ' + (t.createdAt === t.updatedAt ? 'created' : 'updated'),
             description: t.title,
@@ -202,35 +284,43 @@ const Dashboard = () => {
   const metrics = [
     {
       title: 'Total Assets',
+      shortTitle: 'ASSETS',
       value: assetCount,
       change: '+12%',
       trend: 'up',
       icon: Package,
-      color: 'from-blue-500 to-cyan-500'
+      color: 'from-blue-500 to-cyan-500',
+      route: '/assets'
     },
     {
       title: 'Total Credentials',
+      shortTitle: 'CREDENTIALS',
       value: credentialCount,
       change: '+3%',
       trend: 'up',
       icon: Shield,
-      color: 'from-purple-500 to-indigo-500'
+      color: 'from-purple-500 to-indigo-500',
+      route: '/credentials'
     },
     {
       title: 'Open Tickets',
+      shortTitle: 'TICKETS',
       value: openTicketCount,
       change: '-8%',
       trend: 'down',
       icon: Ticket,
-      color: 'from-orange-500 to-red-500'
+      color: 'from-orange-500 to-red-500',
+      route: '/tickets'
     },
     {
       title: 'Total Users',
+      shortTitle: 'USERS',
       value: userCount,
       change: '+5%',
       trend: 'up',
       icon: Users,
-      color: 'from-green-500 to-emerald-500'
+      color: 'from-green-500 to-emerald-500',
+      route: '/users'
     }
   ];
 
@@ -264,34 +354,35 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Metrics Grid */}
-      <div className="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mt-1 sm:mt-2">
+      {/* Metrics Grid - Responsive square cards on mobile */}
+      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4 mt-1 sm:mt-2">
         {metrics.map((metric, index) => {
           const Icon = metric.icon;
           if (!isAdmin && metric.title !== 'Open Tickets') return null;
           return (
             <div
               key={index}
-              className="relative group bg-gradient-to-br from-slate-800/80 to-slate-900/80 border border-cyan-500/20 shadow-lg rounded-2xl px-3 sm:px-4 py-4 sm:py-5 flex flex-row items-center justify-between transition-all duration-300 hover:scale-105 hover:shadow-cyan-500/30 overflow-hidden metric-card"
-              style={{ minHeight: 100 }}
+              onClick={() => navigate(metric.route)}
+              className="relative group bg-gradient-to-br from-slate-800/80 to-slate-900/80 border border-cyan-500/20 shadow-lg rounded-lg sm:rounded-2xl p-2 sm:px-4 sm:py-5 cursor-pointer
+                         flex flex-row sm:flex-row items-center justify-between 
+                         transition-all duration-300 hover:scale-[1.02] sm:hover:scale-105 hover:shadow-cyan-500/30 hover:border-cyan-500/40 
+                         overflow-hidden metric-card active:scale-95"
             >
-              {/* Glow border animation */}
-              <div className="absolute inset-0 rounded-2xl pointer-events-none group-hover:animate-glow border-2 border-cyan-400/30 opacity-30"></div>
-              {/* Icon with animated shine */}
-              <div className={`mr-4 w-12 h-12 rounded-xl flex items-center justify-center bg-gradient-to-r ${metric.color} shadow-lg group-hover:animate-shine`}>
-                <Icon className="w-6 h-6 text-white drop-shadow-lg" />
+              {/* Compact horizontal layout for all screens */}
+              <div className={`w-8 h-8 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl flex items-center justify-center bg-gradient-to-r ${metric.color} shadow-lg flex-shrink-0`}>
+                <Icon className="w-4 h-4 sm:w-6 sm:h-6 text-white" />
               </div>
-              <div className="flex flex-col items-end flex-1">
-                <div className="flex items-center space-x-2 mb-1">
-                  <span className="text-xl font-extrabold text-white tracking-tight drop-shadow-sm">
+              <div className="flex flex-col items-end flex-1 ml-2 sm:ml-4">
+                <div className="flex items-center gap-1 sm:gap-2">
+                  <span className="text-lg sm:text-xl font-bold text-white">
                     {metric.value}
                   </span>
-                  <span className={`flex items-center text-xs font-semibold ${metric.trend === 'up' ? 'text-green-400' : 'text-red-400'} transition-all`}>
-                    <TrendingUp className={`w-3 h-3 mr-0.5 ${metric.trend === 'down' ? 'rotate-180' : ''}`} />
+                  <span className={`flex items-center text-[9px] sm:text-xs font-semibold ${metric.trend === 'up' ? 'text-green-400' : 'text-red-400'}`}>
+                    <TrendingUp className={`w-2 h-2 sm:w-3 sm:h-3 ${metric.trend === 'down' ? 'rotate-180' : ''}`} />
                     {metric.change}
                   </span>
                 </div>
-                <span className="text-xs text-cyan-200/80 tracking-wide uppercase font-medium mb-0.5">{metric.title}</span>
+                <span className="text-[9px] sm:text-xs text-cyan-200/80 uppercase font-medium">{metric.shortTitle}</span>
               </div>
             </div>
           );
@@ -299,24 +390,26 @@ const Dashboard = () => {
         {/* My Assets card for non-admins */}
         {!isAdmin && (
           <div
-            className="relative group bg-gradient-to-br from-slate-800/80 to-slate-900/80 border border-cyan-500/20 shadow-lg rounded-2xl px-3 sm:px-4 py-4 sm:py-5 flex flex-row items-center justify-between transition-all duration-300 hover:scale-105 hover:shadow-cyan-500/30 overflow-hidden metric-card"
-            style={{ minHeight: 100 }}
+            onClick={() => navigate('/assets')}
+            className="relative group bg-gradient-to-br from-slate-800/80 to-slate-900/80 border border-cyan-500/20 shadow-lg rounded-lg sm:rounded-2xl p-2 sm:px-4 sm:py-5 cursor-pointer
+                       flex flex-row items-center justify-between 
+                       transition-all duration-300 hover:scale-[1.02] sm:hover:scale-105 hover:shadow-cyan-500/30 hover:border-cyan-500/40 
+                       overflow-hidden metric-card active:scale-95"
           >
-            <div className="absolute inset-0 rounded-2xl pointer-events-none group-hover:animate-glow border-2 border-cyan-400/30 opacity-30"></div>
-            <div className={`mr-4 w-12 h-12 rounded-xl flex items-center justify-center bg-gradient-to-r from-blue-500 to-cyan-500 shadow-lg group-hover:animate-shine`}>
-              <Package className="w-6 h-6 text-white drop-shadow-lg" />
+            <div className="w-8 h-8 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl flex items-center justify-center bg-gradient-to-r from-blue-500 to-cyan-500 shadow-lg flex-shrink-0">
+              <Package className="w-4 h-4 sm:w-6 sm:h-6 text-white" />
             </div>
-            <div className="flex flex-col items-end flex-1">
-              <div className="flex items-center space-x-2 mb-1">
-                <span className="text-xl font-extrabold text-white tracking-tight drop-shadow-sm">
+            <div className="flex flex-col items-end flex-1 ml-2 sm:ml-4">
+              <div className="flex items-center gap-1 sm:gap-2">
+                <span className="text-lg sm:text-xl font-bold text-white">
                   {assetCount}
                 </span>
-                <span className="flex items-center text-xs font-semibold text-green-400 transition-all">
-                  <TrendingUp className="w-3 h-3 mr-0.5" />
+                <span className="flex items-center text-[9px] sm:text-xs font-semibold text-green-400">
+                  <TrendingUp className="w-2 h-2 sm:w-3 sm:h-3" />
                   +0%
                 </span>
               </div>
-              <span className="text-xs text-cyan-200/80 tracking-wide uppercase font-medium mb-0.5">My Assets</span>
+              <span className="text-[9px] sm:text-xs text-cyan-200/80 uppercase font-medium">MY ASSETS</span>
             </div>
           </div>
         )}
@@ -415,7 +508,102 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Activity and Quick Actions */}
+      {/* Payment Overview — VPS stats + calendar — Admin only, read-only */}
+      {isAdmin ? (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl sm:text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">
+              Payment Overview
+            </h2>
+            <button
+              type="button"
+              onClick={() => navigate('/vps')}
+              className="text-xs sm:text-sm text-cyan-300 hover:text-cyan-200 inline-flex items-center gap-1"
+            >
+              Manage VPS <ChevronRight className="w-3 h-3" />
+            </button>
+          </div>
+
+          {/* Headline: Due + Paid, enlarged in the middle */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+            <div className="glass-morphism rounded-xl sm:rounded-2xl border border-rose-500/30 bg-rose-500/5 p-4 sm:p-5">
+              <p className="text-xs sm:text-sm font-medium uppercase tracking-wide text-rose-300/80">
+                Due · {viewedMonthLabel}
+              </p>
+              {viewedMonthTotals.due.length === 0 ? (
+                <p className="mt-1 sm:mt-2 text-xl sm:text-3xl md:text-4xl font-bold text-slate-500">—</p>
+              ) : (
+                <div className="mt-1 sm:mt-2 space-y-0.5 sm:space-y-1">
+                  {viewedMonthTotals.due.map(({ currency, amount }) => (
+                    <p key={`due-${currency}`} className="text-2xl sm:text-3xl md:text-4xl font-bold text-rose-300 leading-tight truncate">
+                      {formatCurrency(amount, currency)}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="glass-morphism rounded-xl sm:rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4 sm:p-5">
+              <p className="text-xs sm:text-sm font-medium uppercase tracking-wide text-emerald-300/80">
+                Paid · {viewedMonthLabel}
+              </p>
+              {viewedMonthTotals.paid.length === 0 ? (
+                <p className="mt-1 sm:mt-2 text-xl sm:text-3xl md:text-4xl font-bold text-slate-500">—</p>
+              ) : (
+                <div className="mt-1 sm:mt-2 space-y-0.5 sm:space-y-1">
+                  {viewedMonthTotals.paid.map(({ currency, amount }) => (
+                    <p key={`paid-${currency}`} className="text-2xl sm:text-3xl md:text-4xl font-bold text-emerald-300 leading-tight truncate">
+                      {formatCurrency(amount, currency)}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Compact stat cards — same as VPS page */}
+          <div className="grid grid-cols-3 gap-2 sm:gap-3 md:gap-4">
+            <div className="glass-morphism rounded-lg sm:rounded-xl p-2 sm:p-3 md:p-4 border border-cyan-500/20 min-w-0">
+              <p className="text-slate-400 text-[10px] sm:text-xs md:text-sm truncate">Tracked Items</p>
+              <p className="text-base sm:text-xl md:text-2xl font-bold text-white mt-0.5 sm:mt-1">{calendarItems.length}</p>
+              <p className="text-[9px] sm:text-[10px] text-slate-500 mt-0.5 truncate">
+                {vpsList.length} VPS · {subscriptionsList.length} subs
+              </p>
+            </div>
+            <div className="glass-morphism rounded-lg sm:rounded-xl p-2 sm:p-3 md:p-4 border border-emerald-500/20 min-w-0">
+              <p className="text-slate-400 text-[10px] sm:text-xs md:text-sm truncate">
+                {isViewingCurrentMonth ? 'Cost This Month' : `Cost in ${viewedMonthLabel}`}
+              </p>
+              {totalsByCurrency.length === 0 ? (
+                <p className="text-base sm:text-xl md:text-2xl font-bold text-emerald-400 mt-0.5 sm:mt-1 truncate">—</p>
+              ) : (
+                <div className="mt-0.5 sm:mt-1 space-y-0.5">
+                  {totalsByCurrency.map(({ currency, amount }) => (
+                    <p key={currency} className="text-sm sm:text-lg md:text-2xl font-bold text-emerald-400 truncate leading-tight">
+                      {formatCurrency(amount, currency)}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="glass-morphism rounded-lg sm:rounded-xl p-2 sm:p-3 md:p-4 border border-blue-500/20 min-w-0">
+              <p className="text-slate-400 text-[10px] sm:text-xs md:text-sm truncate">
+                {isViewingCurrentMonth ? "This Month's Payments" : `${viewedMonthLabel} Payments`}
+              </p>
+              <p className="text-base sm:text-xl md:text-2xl font-bold text-blue-400 mt-0.5 sm:mt-1">{viewedMonthTotals.count}</p>
+            </div>
+          </div>
+
+          {/* Payment Calendar - Read-only (no interactive props) */}
+          <PaymentCalendar
+            vpsItems={calendarItems}
+            onMonthChange={setViewedMonth}
+            titleAccent="blue"
+          />
+        </div>
+      ) : null}
+
+      {/* Activity and Quick Actions — Admin only */}
+      {isAdmin && (
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-6">
         <div className="lg:col-span-3 glass-morphism p-4 sm:p-6 rounded-xl">
           <div className="flex items-center justify-between mb-6">
@@ -448,6 +636,7 @@ const Dashboard = () => {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 };

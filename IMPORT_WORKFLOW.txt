@@ -1,0 +1,181 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                    EXCEL IMPORT FEATURE WORKFLOW                           ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Step 1: Admin navigates to Assets page                                  │
+└─────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Step 2: Click "Import" button                                           │
+│         (Button is only visible to admin users)                         │
+└─────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Step 3: Import Modal Opens                                              │
+│  ┌───────────────────────────────────────────────────────────────────┐ │
+│  │ • Download Template button (generates Excel file)                 │ │
+│  │ • Format requirements displayed                                   │ │
+│  │ • Category selection (6 options with icons)                       │ │
+│  │ • File upload area (drag & drop or click)                         │ │
+│  └───────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────┘
+                                  │
+                    ┌─────────────┴─────────────┐
+                    │                           │
+                    ▼                           ▼
+    ┌───────────────────────────┐   ┌───────────────────────────┐
+    │ Optional: Download        │   │ User already has          │
+    │ Template                  │   │ prepared Excel file       │
+    │                           │   │                           │
+    │ Downloads:                │   └───────────────────────────┘
+    │ assets_import_template    │               │
+    │ .xlsx                     │               │
+    └───────────────────────────┘               │
+                    │                           │
+                    │                           │
+                    ▼                           │
+    ┌───────────────────────────┐               │
+    │ Fill in asset data:       │               │
+    │                           │               │
+    │ Name | SerialNumber |... │               │
+    │ ─────┼──────────────┼─── │               │
+    │ Dell | SN:ABC123    |... │               │
+    │ HP   | SN:XYZ789    |... │               │
+    └───────────────────────────┘               │
+                    │                           │
+                    └─────────────┬─────────────┘
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Step 4: Select Category                                                 │
+│  ┌────────┬────────┬────────┬────────┬────────┬────────┐              │
+│  │Laptops │Mobiles │Tablets │  SIMs  │Vehicles│  Other │              │
+│  │   💻   │   📱   │   📱   │   📶   │   🚗   │   📦   │              │
+│  └────────┴────────┴────────┴────────┴────────┴────────┘              │
+│                                                                         │
+│  ⚠️ All assets will be added to the selected category                  │
+└─────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Step 5: Upload Excel File                                               │
+│  ┌───────────────────────────────────────────────────────────────────┐ │
+│  │                          📤 Upload                                 │ │
+│  │                                                                    │ │
+│  │           Click to upload Excel file                               │ │
+│  │           or drag and drop                                         │ │
+│  │                                                                    │ │
+│  │           Supports .xlsx and .xls files                            │ │
+│  └───────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ File Selected ✓                                                         │
+│  • example_assets.xlsx                                                  │
+│  • 15.43 KB                                                             │
+└─────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Step 6: Click "Import Assets" button                                    │
+└─────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Backend Processing:                                                     │
+│  1. Receive file data + category ID                                     │
+│  2. Parse Excel file (XLSX library)                                     │
+│  3. Validate each row:                                                  │
+│     • Name is required                                                  │
+│     • SerialNumber is required                                          │
+│     • Status must be valid (free/using/maintenance/retired)             │
+│  4. Bulk insert valid assets                                            │
+│  5. Create history entries                                              │
+│  6. Return results                                                      │
+└─────────────────────────────────────────────────────────────────────────┘
+                                  │
+                    ┌─────────────┴─────────────┐
+                    │                           │
+                    ▼                           ▼
+    ┌───────────────────────────┐   ┌───────────────────────────┐
+    │ ✅ SUCCESS                │   │ ❌ ERROR                  │
+    │                           │   │                           │
+    │ "Successfully imported    │   │ "Failed to import assets" │
+    │  10 assets!"              │   │                           │
+    │                           │   │ • No file provided        │
+    │ Auto-refresh asset list   │   │ • Invalid Excel format    │
+    │ Close modal after 2s      │   │ • Missing required fields │
+    └───────────────────────────┘   │ • Category not selected   │
+                                    └───────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════
+
+                          DATA FLOW DIAGRAM
+
+    Frontend                       Backend                     Database
+    ────────                       ───────                     ────────
+
+ ┌──────────┐                  ┌──────────┐                ┌──────────┐
+ │ Import   │                  │ API      │                │ MongoDB  │
+ │ Modal    │                  │ Endpoint │                │          │
+ └──────────┘                  └──────────┘                └──────────┘
+      │                             │                           │
+      │ POST /api/assets/import     │                           │
+      │ {fileData, categoryId}      │                           │
+      │────────────────────────────>│                           │
+      │                             │                           │
+      │                             │ Parse Excel               │
+      │                             │ (XLSX.read)               │
+      │                             │                           │
+      │                             │ Validate data             │
+      │                             │                           │
+      │                             │ Asset.insertMany()        │
+      │                             │──────────────────────────>│
+      │                             │                           │
+      │                             │ AssetHistory.insertMany() │
+      │                             │──────────────────────────>│
+      │                             │                           │
+      │                             │<──────────────────────────│
+      │                             │ Success/Error             │
+      │                             │                           │
+      │<────────────────────────────│                           │
+      │ {success, imported, errors} │                           │
+      │                             │                           │
+      │ Display result              │                           │
+      │ Refresh asset list          │                           │
+      │                             │                           │
+
+═══════════════════════════════════════════════════════════════════════════
+
+                          FILE STRUCTURE
+
+/root/Itinventory/
+├── api/
+│   └── assets/
+│       ├── index.js              (GET/POST assets)
+│       ├── get.js                (GET asset by ID)
+│       ├── update.js             (UPDATE asset)
+│       ├── delete.js             (DELETE asset)
+│       ├── assign.js             (Assign asset to user)
+│       ├── history.js            (Get asset history)
+│       └── import.js             ⭐ NEW - Import from Excel
+│
+├── src/
+│   ├── components/
+│   │   ├── AssignAssetModal.jsx
+│   │   ├── AssetHistoryList.jsx
+│   │   ├── AssetView.jsx
+│   │   └── ImportAssetsModal.jsx ⭐ NEW - Import UI component
+│   │
+│   └── pages/
+│       └── AssetsPage.jsx        ⭐ UPDATED - Added Import button
+│
+└── Documentation/
+    ├── EXCEL_IMPORT_GUIDE.md     ⭐ NEW - User guide
+    ├── FEATURE_SUMMARY.md        ⭐ NEW - Implementation details
+    └── IMPORT_WORKFLOW.txt       ⭐ NEW - This file
+
+═══════════════════════════════════════════════════════════════════════════

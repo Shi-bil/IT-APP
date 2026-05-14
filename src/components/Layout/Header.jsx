@@ -3,7 +3,8 @@ import ReactDOM from 'react-dom';
 import { Search, User, LogOut, Settings, Menu } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import Parse from '../../config/parseConfig';
+import axios from 'axios';
+import NotificationBell from '../NotificationBell';
 
 // Debounce utility
 function debounce(fn, delay) {
@@ -16,40 +17,31 @@ function debounce(fn, delay) {
 
 async function searchAll(query) {
   if (!query) return [];
-  // Asset search
-  const assetQuery = new Parse.Query('Asset');
-  assetQuery.contains('name', query);
-  // User search (fullname, username, email)
-  const userQueryFullname = new Parse.Query('_User');
-  userQueryFullname.contains('fullname', query);
-  const userQueryUsername = new Parse.Query('_User');
-  userQueryUsername.contains('username', query);
-  const userQueryEmail = new Parse.Query('_User');
-  userQueryEmail.contains('email', query);
-  const userCombined = Parse.Query.or(userQueryFullname, userQueryUsername, userQueryEmail);
-  // Ticket search
-  const ticketQuery = new Parse.Query('Ticket');
-  ticketQuery.contains('title', query);
-  // Credential search (name, username)
-  const credentialQueryName = new Parse.Query('Credential');
-  credentialQueryName.contains('name', query);
-  const credentialQueryUsername = new Parse.Query('Credential');
-  credentialQueryUsername.contains('username', query);
-  const credentialCombined = Parse.Query.or(credentialQueryName, credentialQueryUsername);
-  // Run all in parallel
-  const [assets, users, tickets, credentials] = await Promise.all([
-    assetQuery.limit(5).find(),
-    userCombined.limit(5).find(),
-    ticketQuery.limit(5).find(),
-    credentialCombined.limit(5).find(),
-  ]);
-  // Format results
-  return [
-    ...assets.map(a => ({ type: 'Asset', label: a.get('name'), id: a.id })),
-    ...users.map(u => ({ type: 'User', label: u.get('fullname') || u.get('username') || u.get('email'), id: u.id })),
-    ...tickets.map(t => ({ type: 'Ticket', label: t.get('title'), id: t.id })),
-    ...credentials.map(c => ({ type: 'Credential', label: c.get('name') || c.get('username'), id: c.id })),
-  ];
+  // Use backend search endpoint (admin-only)
+  const token = localStorage.getItem('auth_token');
+  const res = await axios.get('/api/search', {
+    params: { q: query },
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return res.data?.results || [];
+}
+
+// Highlight search match with transparent yellow (for dropdown results)
+function highlightSearch(text, search) {
+  if (!text || typeof text !== 'string') return text;
+  const q = search && search.trim();
+  if (!q) return text;
+  const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`(${escaped})`, 'gi');
+  const parts = String(text).split(regex);
+  if (parts.length === 1) return text;
+  return parts.map((part, i) =>
+    i % 2 === 1 ? (
+      <span key={i} className="bg-yellow-400/25 rounded px-0.5">{part}</span>
+    ) : (
+      part
+    )
+  );
 }
 
 const Header = ({ onToggleSidebar, onMobileMenu }) => {
@@ -95,12 +87,35 @@ const Header = ({ onToggleSidebar, onMobileMenu }) => {
     debouncedSearch(value);
   };
 
-  // Handle search result click
+  // Handle search result click - navigate to the appropriate page with search param
   const handleResultClick = (result) => {
     setShowSearchDropdown(false);
+    const searchTerm = result.label;
     setSearch('');
-    // For now, just log. You can navigate to detail pages here.
-    console.log('Selected:', result);
+    
+    // Navigate to the appropriate page based on result type
+    switch (result.type) {
+      case 'Asset':
+        navigate(`/assets?search=${encodeURIComponent(searchTerm)}`);
+        break;
+      case 'User':
+        navigate(`/users?search=${encodeURIComponent(searchTerm)}`);
+        break;
+      case 'Ticket':
+        navigate(`/tickets?search=${encodeURIComponent(searchTerm)}`);
+        break;
+      case 'Credential':
+        navigate(`/credentials?search=${encodeURIComponent(searchTerm)}`);
+        break;
+      case 'VPS':
+        navigate(`/vps?search=${encodeURIComponent(searchTerm)}`);
+        break;
+      case 'Subscription':
+        navigate(`/subscriptions?search=${encodeURIComponent(searchTerm)}`);
+        break;
+      default:
+        console.log('Unknown result type:', result.type);
+    }
   };
 
   // Close dropdown on outside click or Escape
@@ -179,7 +194,7 @@ const Header = ({ onToggleSidebar, onMobileMenu }) => {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-4 h-4" />
             <input
               type="text"
-              placeholder="Search assets, users, tickets..."
+              placeholder="Search assets, users, tickets, VPS, subs…"
               className="input-field pl-10 w-full"
               value={search}
               onChange={handleSearchChange}
@@ -208,7 +223,7 @@ const Header = ({ onToggleSidebar, onMobileMenu }) => {
                     className="w-full text-left px-4 py-3 hover:bg-cyan-900/40 text-slate-100 text-sm flex items-center gap-2"
                     onClick={() => handleResultClick(result)}
                   >
-                    <span className="font-bold text-cyan-400">{result.type}:</span> {result.label}
+                    <span className="font-bold text-cyan-400">{result.type}:</span> {highlightSearch(result.label, search)}
                   </button>
                 ))}
               </div>,
@@ -217,6 +232,7 @@ const Header = ({ onToggleSidebar, onMobileMenu }) => {
           </div>
         </div>
         <div className="flex items-center space-x-2 md:space-x-4">
+          <NotificationBell />
           <div className="flex items-center space-x-2 md:space-x-3">
             <div className="text-right hidden xs:block">
               <p className="text-xs md:text-sm font-medium text-white">{user?.fullname}</p>

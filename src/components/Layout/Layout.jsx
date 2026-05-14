@@ -8,7 +8,7 @@ const Layout = ({ children }) => {
 
   // Responsive margin: 0 on mobile, 16 on sm, 64 on md+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex overflow-x-hidden">
+    <div className="h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex overflow-hidden">
       {/* Sidebar: hidden on mobile, shown as drawer if open */}
       <Sidebar 
         collapsed={sidebarCollapsed} 
@@ -17,14 +17,14 @@ const Layout = ({ children }) => {
         onMobileClose={() => setSidebarOpen(false)}
       />
       {/* Main content area */}
-      <div className={`flex-1 transition-all duration-300 min-w-0 ${
+      <div className={`flex-1 flex flex-col transition-all duration-300 min-w-0 overflow-hidden ${
         sidebarCollapsed ? 'ml-0 md:ml-16' : 'ml-0 md:ml-64'
       }`}> 
         <Header 
           onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)} 
           onMobileMenu={() => setSidebarOpen(true)}
         />
-        <main className="p-2 sm:p-4 md:p-6 max-w-full w-full mx-auto">
+        <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-2 sm:p-4 md:p-6 max-w-full w-full mx-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
           {children}
         </main>
       </div>

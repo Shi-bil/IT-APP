@@ -1,356 +1,139 @@
-import Parse from '../config/parseConfig';
+import axios from 'axios';
+import { readCache, writeCache, invalidatePrefix } from './_cache';
 
-// Credential management service using Parse
+// Credential management service using HTTP API
 export const credentialService = {
+  peekAllCredentials: () => readCache('credentials:all'),
+
   // Create a new credential
   createCredential: async (credentialData) => {
     try {
-      const Credential = Parse.Object.extend('Credential');
-      const credential = new Credential();
-      
-      // Set credential properties
-      credential.set('name', credentialData.name);
-      credential.set('type', credentialData.type);
-      
-      if (credentialData.username) {
-        credential.set('username', credentialData.username);
-      }
-      
-      credential.set('password', credentialData.password);
-      
-      if (credentialData.url) {
-        credential.set('url', credentialData.url);
-      }
-      
-      credential.set('category', credentialData.category);
-      credential.set('isEncrypted', true);
-      
-      if (credentialData.notes) {
-        credential.set('notes', credentialData.notes);
-      }
-      
-      if (credentialData.expiryDate) {
-        credential.set('expiryDate', new Date(credentialData.expiryDate));
-      }
-      
-      // Set created by current user
-      const currentUser = Parse.User.current();
-      if (currentUser) {
-        credential.set('createdBy', currentUser);
-      }
-      
-      // Set ACL to restrict access to only the creator
-      const acl = new Parse.ACL(currentUser);
-      credential.setACL(acl);
-      
-      // Save the credential
-      const savedCredential = await credential.save();
-      
-      return {
-        success: true,
-        credential: {
-          id: savedCredential.id,
-          name: savedCredential.get('name'),
-          type: savedCredential.get('type'),
-          username: savedCredential.get('username'),
-          password: savedCredential.get('password'),
-          url: savedCredential.get('url'),
-          category: savedCredential.get('category'),
-          isEncrypted: savedCredential.get('isEncrypted'),
-          notes: savedCredential.get('notes'),
-          expiryDate: savedCredential.get('expiryDate'),
-          createdAt: savedCredential.createdAt
-        }
-      };
+      console.log('credentialService: Sending credential data:', credentialData);
+      const token = localStorage.getItem('auth_token');
+      const res = await axios.post('/api/credentials', credentialData, {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+      });
+      console.log('credentialService: Response received:', res.data);
+      invalidatePrefix('credentials:');
+      return { success: true, credential: res.data.credential };
     } catch (error) {
       console.error('Create credential error:', error);
-      return { success: false, error: error.message };
+      console.error('Error response:', error.response);
+      console.error('Error response data:', error.response?.data);
+      console.error('Error status:', error.response?.status);
+      return { success: false, error: error.response?.data?.error || error.message };
     }
   },
 
   // Get all credentials for the current user
   getAllCredentials: async () => {
     try {
-      const Credential = Parse.Object.extend('Credential');
-      const query = new Parse.Query(Credential);
-      
-      // Include the createdBy user object
-      query.include('createdBy');
-      
-      // Sort by creation date, newest first
-      query.descending('createdAt');
-      
-      const results = await query.find();
-      
-      return {
-        success: true,
-        credentials: results.map(credential => ({
-          id: credential.id,
-          name: credential.get('name'),
-          type: credential.get('type'),
-          username: credential.get('username'),
-          password: credential.get('password'),
-          url: credential.get('url'),
-          category: credential.get('category'),
-          isEncrypted: credential.get('isEncrypted'),
-          notes: credential.get('notes'),
-          expiryDate: credential.get('expiryDate'),
-          createdAt: credential.createdAt,
-          createdBy: credential.get('createdBy') ? {
-            id: credential.get('createdBy').id,
-            username: credential.get('createdBy').get('username'),
-            email: credential.get('createdBy').get('email'),
-            firstName: credential.get('createdBy').get('firstName') || '',
-            lastName: credential.get('createdBy').get('lastName') || '',
-            fullname: credential.get('createdBy').get('fullname') || '',
-            role: credential.get('createdBy').get('role') || 'employee',
-            department: credential.get('createdBy').get('department') || ''
-          } : null
-        }))
-      };
+      const token = localStorage.getItem('auth_token');
+      const res = await axios.get('/api/credentials', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const result = { success: true, credentials: res.data.credentials || [] };
+      writeCache('credentials:all', result);
+      return result;
     } catch (error) {
       console.error('Get credentials error:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.response?.data?.error || error.message, credentials: [] };
     }
   },
 
   // Get credential by ID
   getCredentialById: async (credentialId) => {
     try {
-      const Credential = Parse.Object.extend('Credential');
-      const query = new Parse.Query(Credential);
-      
-      query.include('createdBy');
-      
-      const credential = await query.get(credentialId);
-      
-      return {
-        success: true,
-        credential: {
-          id: credential.id,
-          name: credential.get('name'),
-          type: credential.get('type'),
-          username: credential.get('username'),
-          password: credential.get('password'),
-          url: credential.get('url'),
-          category: credential.get('category'),
-          isEncrypted: credential.get('isEncrypted'),
-          notes: credential.get('notes'),
-          expiryDate: credential.get('expiryDate'),
-          createdAt: credential.createdAt,
-          createdBy: credential.get('createdBy') ? {
-            id: credential.get('createdBy').id,
-            username: credential.get('createdBy').get('username'),
-            fullname: credential.get('createdBy').get('fullname') || '',
-            role: credential.get('createdBy').get('role') || 'employee'
-          } : null
-        }
-      };
+      const token = localStorage.getItem('auth_token');
+      const res = await axios.get('/api/credentials/get', {
+        params: { id: credentialId },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return { success: true, credential: res.data.credential };
     } catch (error) {
       console.error('Get credential error:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.response?.data?.error || error.message };
     }
   },
 
   // Update credential
   updateCredential: async (credentialId, credentialData) => {
     try {
-      const Credential = Parse.Object.extend('Credential');
-      const query = new Parse.Query(Credential);
-      const credential = await query.get(credentialId);
-      
-      // Update credential properties
-      credential.set('name', credentialData.name);
-      credential.set('type', credentialData.type);
-      
-      if (credentialData.username !== undefined) {
-        credential.set('username', credentialData.username);
-      }
-      
-      if (credentialData.password !== undefined) {
-        credential.set('password', credentialData.password);
-      }
-      
-      if (credentialData.url !== undefined) {
-        credential.set('url', credentialData.url);
-      }
-      
-      credential.set('category', credentialData.category);
-      
-      if (credentialData.notes !== undefined) {
-        credential.set('notes', credentialData.notes);
-      }
-      
-      if (credentialData.expiryDate !== undefined) {
-        credential.set('expiryDate', credentialData.expiryDate ? new Date(credentialData.expiryDate) : null);
-      }
-      
-      const savedCredential = await credential.save();
-      
-      return {
-        success: true,
-        credential: {
-          id: savedCredential.id,
-          name: savedCredential.get('name'),
-          type: savedCredential.get('type'),
-          username: savedCredential.get('username'),
-          password: savedCredential.get('password'),
-          url: savedCredential.get('url'),
-          category: savedCredential.get('category'),
-          isEncrypted: savedCredential.get('isEncrypted'),
-          notes: savedCredential.get('notes'),
-          expiryDate: savedCredential.get('expiryDate'),
-          createdAt: savedCredential.createdAt,
-          updatedAt: savedCredential.updatedAt
-        }
-      };
+      const token = localStorage.getItem('auth_token');
+      const res = await axios.put('/api/credentials/update', { id: credentialId, ...credentialData }, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      invalidatePrefix('credentials:');
+      return { success: true, credential: res.data.credential };
     } catch (error) {
       console.error('Update credential error:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.response?.data?.error || error.message };
     }
   },
 
   // Delete credential
   deleteCredential: async (credentialId) => {
     try {
-      const Credential = Parse.Object.extend('Credential');
-      const query = new Parse.Query(Credential);
-      const credential = await query.get(credentialId);
-      
-      await credential.destroy();
-      
+      const token = localStorage.getItem('auth_token');
+      await axios.post('/api/credentials/delete', { id: credentialId }, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      invalidatePrefix('credentials:');
       return { success: true };
     } catch (error) {
       console.error('Delete credential error:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.response?.data?.error || error.message };
     }
   },
 
   // Search credentials
   searchCredentials: async (searchTerm) => {
     try {
-      const Credential = Parse.Object.extend('Credential');
-      
-      // Create multiple queries for different fields
-      const nameQuery = new Parse.Query(Credential);
-      nameQuery.matches('name', searchTerm, 'i');
-      
-      const usernameQuery = new Parse.Query(Credential);
-      usernameQuery.matches('username', searchTerm, 'i');
-      
-      const categoryQuery = new Parse.Query(Credential);
-      categoryQuery.matches('category', searchTerm, 'i');
-      
-      // Combine queries with OR
-      const query = Parse.Query.or(nameQuery, usernameQuery, categoryQuery);
-      
-      query.include('createdBy');
-      query.descending('createdAt');
-      
-      const results = await query.find();
-      
-      return {
-        success: true,
-        credentials: results.map(credential => ({
-          id: credential.id,
-          name: credential.get('name'),
-          type: credential.get('type'),
-          username: credential.get('username'),
-          password: credential.get('password'),
-          url: credential.get('url'),
-          category: credential.get('category'),
-          isEncrypted: credential.get('isEncrypted'),
-          notes: credential.get('notes'),
-          expiryDate: credential.get('expiryDate'),
-          createdAt: credential.createdAt,
-          createdBy: credential.get('createdBy') ? {
-            id: credential.get('createdBy').id,
-            username: credential.get('createdBy').get('username'),
-            fullname: credential.get('createdBy').get('fullname') || ''
-          } : null
-        }))
-      };
+      const token = localStorage.getItem('auth_token');
+      const res = await axios.get('/api/credentials', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const regex = new RegExp(searchTerm, 'i');
+      const filtered = (res.data.credentials || []).filter(c =>
+        regex.test(c.name || '') || regex.test(c.username || '') || regex.test(c.category || '')
+      );
+      return { success: true, credentials: filtered };
     } catch (error) {
       console.error('Search credentials error:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.response?.data?.error || error.message, credentials: [] };
     }
   },
   
   // Get credentials by type
   getCredentialsByType: async (type) => {
     try {
-      const Credential = Parse.Object.extend('Credential');
-      const query = new Parse.Query(Credential);
-      
-      query.equalTo('type', type);
-      query.include('createdBy');
-      query.descending('createdAt');
-      
-      const results = await query.find();
-      
-      return {
-        success: true,
-        credentials: results.map(credential => ({
-          id: credential.id,
-          name: credential.get('name'),
-          type: credential.get('type'),
-          username: credential.get('username'),
-          password: credential.get('password'),
-          url: credential.get('url'),
-          category: credential.get('category'),
-          isEncrypted: credential.get('isEncrypted'),
-          notes: credential.get('notes'),
-          expiryDate: credential.get('expiryDate'),
-          createdAt: credential.createdAt,
-          createdBy: credential.get('createdBy') ? {
-            id: credential.get('createdBy').id,
-            username: credential.get('createdBy').get('username'),
-            fullname: credential.get('createdBy').get('fullname') || ''
-          } : null
-        }))
-      };
+      const token = localStorage.getItem('auth_token');
+      const res = await axios.get('/api/credentials', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const filtered = (res.data.credentials || []).filter(c => (c.type || '') === type);
+      return { success: true, credentials: filtered };
     } catch (error) {
       console.error('Get credentials by type error:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.response?.data?.error || error.message, credentials: [] };
     }
   },
   
   // Get credentials by category
   getCredentialsByCategory: async (category) => {
     try {
-      const Credential = Parse.Object.extend('Credential');
-      const query = new Parse.Query(Credential);
-      
-      query.equalTo('category', category);
-      query.include('createdBy');
-      query.descending('createdAt');
-      
-      const results = await query.find();
-      
-      return {
-        success: true,
-        credentials: results.map(credential => ({
-          id: credential.id,
-          name: credential.get('name'),
-          type: credential.get('type'),
-          username: credential.get('username'),
-          password: credential.get('password'),
-          url: credential.get('url'),
-          category: credential.get('category'),
-          isEncrypted: credential.get('isEncrypted'),
-          notes: credential.get('notes'),
-          expiryDate: credential.get('expiryDate'),
-          createdAt: credential.createdAt,
-          createdBy: credential.get('createdBy') ? {
-            id: credential.get('createdBy').id,
-            username: credential.get('createdBy').get('username'),
-            fullname: credential.get('createdBy').get('fullname') || ''
-          } : null
-        }))
-      };
+      const token = localStorage.getItem('auth_token');
+      const res = await axios.get('/api/credentials', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const filtered = (res.data.credentials || []).filter(c => (c.category || '') === category);
+      return { success: true, credentials: filtered };
     } catch (error) {
       console.error('Get credentials by category error:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.response?.data?.error || error.message, credentials: [] };
     }
   }
 };

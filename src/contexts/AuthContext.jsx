@@ -1,7 +1,18 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import parseService from '../services/parseService';
+import React, { createContext, useContext, useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
+import axios from 'axios';
+import authService from '../services/authService';
 
 const AuthContext = createContext(undefined);
+
+// Initialize user synchronously from localStorage to avoid flash
+const getInitialUser = () => {
+  try {
+    const raw = localStorage.getItem('auth_user');
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
@@ -12,59 +23,138 @@ export const useAuth = () => {
 };
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
+  // Initialize with user from localStorage immediately (no loading state needed)
+  const [user, setUser] = useState(getInitialUser);
+  const [isLoading, setIsLoading] = useState(false);
+  const [sessionMessage, setSessionMessage] = useState(null);
+  const sessionCheckIntervalRef = useRef(null);
 
-  useEffect(() => {
-    // Check for existing session from Parse
-    const currentUser = parseService.getCurrentUser();
+  // Verify session is still valid (optional background check)
+  useLayoutEffect(() => {
+    const currentUser = authService.getSavedUser();
     if (currentUser) {
       setUser(currentUser);
     }
-    setIsLoading(false);
   }, []);
 
+  // Function to validate session with backend
+  const validateSession = useCallback(async () => {
+    const token = localStorage.getItem('auth_token');
+    if (!token) return;
+
+    try {
+      const res = await axios.get('/api/me/validate-session', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.data.roleChanged) {
+        // Role changed, force logout with message
+        setSessionMessage(res.data.message || 'Your role has been updated. Please log in again.');
+        authService.clearSession();
+        setUser(null);
+      }
+    } catch (error) {
+      if (error.response?.status === 401) {
+        const data = error.response.data;
+        if (data.reason === 'demoted') {
+          // User was demoted, force logout with message
+          setSessionMessage(data.message || 'Your admin privileges have been revoked. Please log in again.');
+        } else {
+          setSessionMessage('Your session has expired. Please log in again.');
+        }
+        authService.clearSession();
+        setUser(null);
+      }
+    }
+  }, []);
+
+  // Set up periodic session validation (every 5 seconds for quick detection)
+  useEffect(() => {
+    if (user && user.role === 'admin') {
+      // Validate immediately on mount
+      validateSession();
+      
+      // Set up interval for periodic validation
+      sessionCheckIntervalRef.current = setInterval(validateSession, 5000);
+      
+      return () => {
+        if (sessionCheckIntervalRef.current) {
+          clearInterval(sessionCheckIntervalRef.current);
+        }
+      };
+    }
+  }, [user, validateSession]);
+
   const login = async (username, password) => {
-    const result = await parseService.login(username, password);
+    try {
+      const result = await authService.loginAdmin(username, password);
     if (result.success) {
+        authService.saveSession(result.token, result.user);
       setUser(result.user);
       return true;
     }
     return { error: result.error || 'Invalid credentials. Please try again.' };
+    } catch (e) {
+      return { error: e.response?.data?.error || e.message || 'Login failed' };
+    }
   };
 
   const loginAsEmployee = async (email, password) => {
-    const result = await parseService.loginWithEmail(email, password);
+    try {
+      const result = await authService.loginEmployee(email, password);
     if (result.success) {
+        authService.saveSession(result.token, result.user);
       setUser(result.user);
       return true;
     }
     throw new Error(result.error || 'Login failed');
+    } catch (e) {
+      throw new Error(e.response?.data?.error || e.message || 'Login failed');
+    }
   };
 
   const register = async (userData) => {
-    return await parseService.register(userData);
+    try {
+      const res = await authService.register(userData);
+      return res;
+    } catch (e) {
+      return { success: false, error: e.response?.data?.error || e.message };
+    }
   };
 
   const resendVerificationEmail = async (email) => {
-    return await parseService.resendVerificationEmail(email);
+    try {
+      // same as send code
+      return await authService.sendVerificationCode(email);
+    } catch (e) {
+      return { success: false, error: e.response?.data?.error || e.message };
+    }
   };
   
   const sendVerificationCode = async (email) => {
-    return await parseService.sendVerificationCode(email);
+    try {
+      return await authService.sendVerificationCode(email);
+    } catch (e) {
+      return { success: false, error: e.response?.data?.error || e.message };
+    }
   };
   
   const verifyEmailWithCode = async (email, code) => {
-    return await parseService.verifyEmailWithCode(email, code);
+    try {
+      return await authService.verifyEmailWithCode(email, code);
+    } catch (e) {
+      return { success: false, error: e.response?.data?.error || e.message };
+    }
   };
 
   const logout = async () => {
-    await parseService.logout();
+    authService.clearSession();
     setUser(null);
   };
 
   const resetPassword = async (email) => {
-    return await parseService.requestPasswordReset(email);
+    // Not implemented yet on new API
+    return { success: false, error: 'Not implemented' };
   };
 
   // Check if user has permission for a specific action or resource
@@ -81,6 +171,11 @@ export const AuthProvider = ({ children }) => {
     return user.role === requiredRole;
   };
 
+  // Function to clear session message
+  const clearSessionMessage = useCallback(() => {
+    setSessionMessage(null);
+  }, []);
+
   return (
     <AuthContext.Provider value={{
       user,
@@ -95,6 +190,8 @@ export const AuthProvider = ({ children }) => {
       resetPassword,
       logout,
       hasPermission,
+      sessionMessage,
+      clearSessionMessage,
     }}>
       {children}
     </AuthContext.Provider>

@@ -1,54 +1,21 @@
-import Parse from '../config/parseConfig';
+import axios from 'axios';
+import authService from './authService';
+import { readCache, writeCache, invalidatePrefix } from './_cache';
 
-// Ticket management service using Parse
+// Ticket management service using HTTP API
 export const ticketService = {
+  peekAllTickets: () => readCache('tickets:all'),
+  peekUserTickets: () => readCache('tickets:mine'),
+
   // Create a new ticket
   createTicket: async (ticketData) => {
     try {
-      const Ticket = Parse.Object.extend('Ticket');
-      const ticket = new Ticket();
-      
-      // Set basic ticket properties
-      ticket.set('title', ticketData.title);
-      ticket.set('description', ticketData.description);
-      ticket.set('category', ticketData.category);
-      ticket.set('priority', ticketData.priority);
-      ticket.set('status', 'open'); // Default status is open
-      
-      // Set tags if provided
-      if (ticketData.tags && Array.isArray(ticketData.tags)) {
-        ticket.set('tags', ticketData.tags);
-      }
-      
-      // Set due date if provided
-      if (ticketData.dueDate) {
-        ticket.set('dueDate', new Date(ticketData.dueDate));
-      }
-      
-      // Set created by current user
-      const currentUser = Parse.User.current();
-      if (currentUser) {
-        ticket.set('createdBy', currentUser);
-      }
-      
-      // Save the ticket
-      const savedTicket = await ticket.save();
-      
-      return {
-        success: true,
-        ticket: {
-          id: savedTicket.id,
-          title: savedTicket.get('title'),
-          description: savedTicket.get('description'),
-          category: savedTicket.get('category'),
-          priority: savedTicket.get('priority'),
-          status: savedTicket.get('status'),
-          tags: savedTicket.get('tags') || [],
-          dueDate: savedTicket.get('dueDate'),
-          createdAt: savedTicket.createdAt,
-          updatedAt: savedTicket.updatedAt
-        }
-      };
+      const token = localStorage.getItem('auth_token');
+      const res = await axios.post('/api/tickets', ticketData, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      invalidatePrefix('tickets:');
+      return { success: true, ticket: res.data.ticket };
     } catch (error) {
       console.error('Create ticket error:', error);
       return { success: false, error: error.message };
@@ -58,53 +25,45 @@ export const ticketService = {
   // Get all tickets
   getAllTickets: async () => {
     try {
-      // Use the cloud function to get tickets with user info
-      const results = await Parse.Cloud.run('getTicketsWithUserInfo');
-      console.log("Tickets with user info from cloud function:", results);
-      
-      return {
-        success: true,
-        tickets: results
-      };
+      const token = localStorage.getItem('auth_token');
+      const res = await axios.get('/api/tickets', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const result = { success: true, tickets: res.data.tickets || [] };
+      writeCache('tickets:all', result);
+      return result;
     } catch (error) {
       console.error('Get tickets error:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.response?.data?.error || error.message, tickets: [] };
     }
   },
 
   // Get tickets for current user
   getUserTickets: async () => {
     try {
-      const currentUser = Parse.User.current();
-      if (!currentUser) {
-        return { success: false, error: 'User not authenticated' };
-      }
-
-      // Use the cloud function to get user tickets with user info
-      const tickets = await Parse.Cloud.run('getUserTicketsWithUserInfo');
-      console.log("User tickets with info from cloud function:", tickets);
-      
-      return {
-        success: true,
-        tickets
-      };
+      const token = localStorage.getItem('auth_token');
+      const res = await axios.get('/api/tickets', {
+        params: { mine: 'true' },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const result = { success: true, tickets: res.data.tickets || [] };
+      writeCache('tickets:mine', result);
+      return result;
     } catch (error) {
       console.error('Get user tickets error:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.response?.data?.error || error.message, tickets: [] };
     }
   },
 
   // Get ticket by ID
   getTicketById: async (ticketId) => {
     try {
-      // Use the cloud function to get ticket details with user info
-      const ticket = await Parse.Cloud.run('getTicketByIdWithUserInfo', { ticketId });
-      console.log("Ticket with user info from cloud function:", ticket);
-      
-      return {
-        success: true,
-        ticket
-      };
+      const token = localStorage.getItem('auth_token');
+      const res = await axios.get('/api/tickets/get', {
+        params: { ticketId },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return { success: true, ticket: res.data.ticket };
     } catch (error) {
       console.error('Get ticket error:', error);
       return { success: false, error: error.message };
@@ -114,62 +73,12 @@ export const ticketService = {
   // Update ticket
   updateTicket: async (ticketId, ticketData) => {
     try {
-      const Ticket = Parse.Object.extend('Ticket');
-      const query = new Parse.Query(Ticket);
-      const ticket = await query.get(ticketId);
-      
-      // Update ticket properties
-      if (ticketData.title !== undefined) {
-        ticket.set('title', ticketData.title);
-      }
-      
-      if (ticketData.description !== undefined) {
-        ticket.set('description', ticketData.description);
-      }
-      
-      if (ticketData.category !== undefined) {
-        ticket.set('category', ticketData.category);
-      }
-      
-      if (ticketData.priority !== undefined) {
-        ticket.set('priority', ticketData.priority);
-      }
-      
-      if (ticketData.status !== undefined) {
-        ticket.set('status', ticketData.status);
-      }
-      
-      if (ticketData.tags !== undefined) {
-        ticket.set('tags', ticketData.tags);
-      }
-      
-      if (ticketData.dueDate !== undefined) {
-        ticket.set('dueDate', ticketData.dueDate ? new Date(ticketData.dueDate) : null);
-      }
-      
-      if (ticketData.resolution !== undefined) {
-        ticket.set('resolution', ticketData.resolution);
-      }
-      
-      // Save the updated ticket
-      const savedTicket = await ticket.save();
-      
-      return {
-        success: true,
-        ticket: {
-          id: savedTicket.id,
-          title: savedTicket.get('title'),
-          description: savedTicket.get('description'),
-          category: savedTicket.get('category'),
-          priority: savedTicket.get('priority'),
-          status: savedTicket.get('status'),
-          tags: savedTicket.get('tags') || [],
-          dueDate: savedTicket.get('dueDate'),
-          resolution: savedTicket.get('resolution'),
-          createdAt: savedTicket.createdAt,
-          updatedAt: savedTicket.updatedAt
-        }
-      };
+      const token = localStorage.getItem('auth_token');
+      const res = await axios.put('/api/tickets/update', { ticketId, ...ticketData }, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      invalidatePrefix('tickets:');
+      return { success: true, ticket: res.data.ticket };
     } catch (error) {
       console.error('Update ticket error:', error);
       return { success: false, error: error.message };
@@ -179,20 +88,7 @@ export const ticketService = {
   // Assign ticket to a user
   assignTicket: async (ticketId, userId) => {
     try {
-      const Ticket = Parse.Object.extend('Ticket');
-      const query = new Parse.Query(Ticket);
-      const ticket = await query.get(ticketId);
-      
-      // Create a pointer to the User object
-      const userPointer = Parse.User.createWithoutData(userId);
-      
-      // Update ticket properties
-      ticket.set('assignedTo', userPointer);
-      ticket.set('status', 'in-progress');
-      
-      await ticket.save();
-      
-      return { success: true };
+      return await ticketService.updateTicket(ticketId, { assignedToUserId: userId, status: 'in-progress' });
     } catch (error) {
       console.error('Assign ticket error:', error);
       return { success: false, error: error.message };
@@ -202,23 +98,10 @@ export const ticketService = {
   // Add comment to ticket
   addComment: async (ticketId, commentText) => {
     try {
-      const TicketComment = Parse.Object.extend('TicketComment');
-      const comment = new TicketComment();
-  
-      // Correct pointer creation
-      const Ticket = Parse.Object.extend('Ticket');
-      const ticketPointer = new Ticket();
-      ticketPointer.id = ticketId;
-      comment.set('ticket', ticketPointer);
-  
-      comment.set('text', commentText);
-  
-      const currentUser = Parse.User.current();
-      if (currentUser) {
-        comment.set('createdBy', currentUser);
-      }
-  
-      await comment.save();
+      const token = localStorage.getItem('auth_token');
+      await axios.post('/api/tickets/comments', { ticketId, text: commentText }, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       return { success: true };
     } catch (error) {
       console.error('Add comment error:', error);
@@ -229,41 +112,44 @@ export const ticketService = {
   // Get comments for a ticket
   getTicketComments: async (ticketId) => {
     try {
-      // Use the cloud function to get comments with user info
-      const comments = await Parse.Cloud.run('getTicketCommentsWithUserInfo', { ticketId });
-      console.log("Comments with user info from cloud function:", comments);
-      
-      return {
-        success: true,
-        comments
-      };
+      const token = localStorage.getItem('auth_token');
+      const res = await axios.get('/api/tickets/comments', {
+        params: { ticketId },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return { success: true, comments: res.data.comments || [] };
     } catch (error) {
       console.error('Get ticket comments error:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.response?.data?.error || error.message, comments: [] };
     }
   },
 
   // Get ticket statistics for dashboard
   getTicketStats: async () => {
     try {
-      const stats = await Parse.Cloud.run('getTicketStats');
-      return {
-        success: true,
-        stats
-      };
+      const token = localStorage.getItem('auth_token');
+      const res = await axios.get('/api/tickets/stats', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return { success: true, stats: res.data.stats || { total: 0, open: 0, inProgress: 0, closed: 0 } };
     } catch (error) {
       console.error('Get ticket stats error:', error);
-      return { success: false, error: error.message };
+      return { 
+        success: false, 
+        error: error.response?.data?.error || error.message,
+        stats: { total: 0, open: 0, inProgress: 0, closed: 0 }
+      };
     }
   },
 
   // Delete ticket
   deleteTicket: async (ticketId) => {
     try {
-      const Ticket = Parse.Object.extend('Ticket');
-      const query = new Parse.Query(Ticket);
-      const ticket = await query.get(ticketId);
-      await ticket.destroy();
+      const token = localStorage.getItem('auth_token');
+      await axios.post('/api/tickets/delete', { ticketId }, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      invalidatePrefix('tickets:');
       return { success: true };
     } catch (error) {
       console.error('Delete ticket error:', error);

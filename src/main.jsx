@@ -1,38 +1,37 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
+import { Toaster } from 'react-hot-toast'
 import App from './App.jsx'
 import './index.css'
 import { AuthProvider } from './contexts/AuthContext'
-import { EventEmitter } from 'events'
+import { TicketProvider } from './contexts/TicketContext'
+import { PaymentsProvider } from './contexts/PaymentsContext'
 
-// Fix for "Emitter is not a constructor" error
-if (typeof window !== 'undefined') {
-  window.EventEmitter = EventEmitter;
-}
+// Render app immediately - no waiting
+const root = document.getElementById('root');
 
-// Initialize the app with error handling
-const renderApp = () => {
-  try {
-    ReactDOM.createRoot(document.getElementById('root')).render(
-      <React.StrictMode>
-        <BrowserRouter>
-          <AuthProvider>
-            <App />
-          </AuthProvider>
-        </BrowserRouter>
-      </React.StrictMode>,
-    )
-  } catch (error) {
-    console.error('Error rendering the application:', error);
-    document.getElementById('root').innerHTML = `
-      <div style="padding: 20px; text-align: center;">
-        <h2>Error loading application</h2>
-        <p style="color: red;">${error.message}</p>
-        <button onclick="location.reload()">Reload</button>
-      </div>
-    `;
-  }
-}
-
-renderApp();
+ReactDOM.createRoot(root).render(
+  <BrowserRouter
+    future={{
+      v7_startTransition: true,
+      v7_relativeSplatPath: true
+    }}
+  >
+    <AuthProvider>
+      <TicketProvider>
+        <PaymentsProvider>
+          <App />
+          <Toaster
+            position="top-right"
+            toastOptions={{
+              style: { background: '#0f172a', color: '#e2e8f0', border: '1px solid rgba(34,211,238,0.3)' },
+              success: { iconTheme: { primary: '#22d3ee', secondary: '#0f172a' } },
+              error: { iconTheme: { primary: '#f43f5e', secondary: '#0f172a' } },
+            }}
+          />
+        </PaymentsProvider>
+      </TicketProvider>
+    </AuthProvider>
+  </BrowserRouter>
+);

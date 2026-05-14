@@ -1,24 +1,30 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, Suspense, lazy } from 'react';
 import { Routes, Route, Navigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
-import Layout from './components/Layout/Layout';
-import Dashboard from './pages/Dashboard';
-import LoginPage from './pages/LoginPage';
-import UsersPage from './pages/UsersPage';
-import AssetsPage from './pages/AssetsPage';
-import AssetForm from './pages/AssetForm';
-import TicketsPage from './pages/TicketsPage';
-import CredentialsPage from './pages/CredentialsPage';
-import SettingsPage from './pages/SettingsPage';
-import Parse from './config/parseConfig';
+import SplashScreen from './components/SplashScreen';
+import PWAPrompt from './components/PWAPrompt';
+import axios from 'axios';
+
+// Lazy load heavy components for faster initial render
+const Layout = lazy(() => import('./components/Layout/Layout'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const UsersPage = lazy(() => import('./pages/UsersPage'));
+const AssetsPage = lazy(() => import('./pages/AssetsPage'));
+const AssetForm = lazy(() => import('./pages/AssetForm'));
+const TicketsPage = lazy(() => import('./pages/TicketsPage'));
+const CredentialsPage = lazy(() => import('./pages/CredentialsPage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const SubscriptionsPage = lazy(() => import('./pages/SubscriptionsPage'));
+const VpsPage = lazy(() => import('./pages/VpsPage'));
+const ObjectStoragePage = lazy(() => import('./pages/ObjectStoragePage'));
+const PaymentsPage = lazy(() => import('./pages/PaymentsPage'));
+const AiCreditsPage = lazy(() => import('./pages/AiCreditsPage'));
+const ProjectsPage = lazy(() => import('./pages/ProjectsPage'));
 
 // Protected Route Component
 const ProtectedRoute = ({ children, requiredRole }) => {
-  const { user, isAuthenticated, isLoading } = useAuth();
-  
-  if (isLoading) {
-    return <div>Loading...</div>;
-  }
+  const { user, isAuthenticated } = useAuth();
   
   if (!isAuthenticated) {
     return <Navigate to="/login" />;
@@ -49,23 +55,23 @@ const EmailVerificationPage = () => {
   useEffect(() => {
     const verifyEmail = async () => {
       try {
-        const token = searchParams.get('token');
+        const code = searchParams.get('code');
         const email = searchParams.get('email');
         
-        if (!token || !email) {
+        if (!code || !email) {
           setStatus('error');
-          setMessage('Invalid verification link. Missing token or email.');
+          setMessage('Invalid verification link. Missing code or email.');
           return;
         }
         
-        const result = await Parse.Cloud.run('verifyEmailWithToken', { email, token });
+        const response = await axios.post('/api/verify-code', { email, code });
         
-        if (result.success) {
+        if (response.data?.success) {
           setStatus('success');
           setMessage('Your email has been successfully verified! You can now log in.');
         } else {
           setStatus('error');
-          setMessage(result.error || 'Failed to verify email. Please try again.');
+          setMessage(response.data?.error || 'Failed to verify email. Please try again.');
         }
       } catch (error) {
         setStatus('error');
@@ -133,6 +139,9 @@ const EmailVerificationPage = () => {
 
 function App() {
   return (
+    <>
+      <PWAPrompt />
+      <Suspense fallback={<SplashScreen message="Loading app..." />}>
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/verify-email" element={<EmailVerificationPage />} />
@@ -227,7 +236,80 @@ function App() {
           </ProtectedRoute>
         } 
       />
+
+      <Route
+        path="/subscriptions"
+        element={
+          <ProtectedRoute requiredRole="admin">
+            <Layout>
+              <SubscriptionsPage />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/vps"
+        element={
+          <ProtectedRoute requiredRole="admin">
+            <Layout>
+              <VpsPage />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/object-storage"
+        element={
+          <ProtectedRoute requiredRole="admin">
+            <Layout>
+              <ObjectStoragePage />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/payments"
+        element={
+          <ProtectedRoute requiredRole="admin">
+            <Layout>
+              <PaymentsPage />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/projects"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <ProjectsPage />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/projects/:projectId"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <ProjectsPage />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ai-credits"
+        element={
+          <ProtectedRoute requiredRole="admin">
+            <Layout>
+              <AiCreditsPage />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
     </Routes>
+      </Suspense>
+    </>
   );
 }
 

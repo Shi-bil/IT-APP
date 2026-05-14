@@ -2,12 +2,141 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+    <!-- Primary Meta Tags -->
     <title>IT Management System</title>
+    <meta name="title" content="IT Management System" />
+    <meta name="description" content="IT Asset Management System - Track and manage your IT inventory across all devices" />
+    
+    <!-- Mobile & PWA Meta Tags -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="IT MGMT" />
+    <meta name="application-name" content="IT MGMT" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="msapplication-TileColor" content="#0f172a" />
+    <meta name="msapplication-tap-highlight" content="no" />
+    
+    <!-- Favicons -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" sizes="32x32" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" sizes="16x16" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.svg" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.svg" />
+    <link rel="mask-icon" href="/favicon.svg" color="#3b82f6" />
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="IT Management System" />
+    <meta property="og:description" content="IT Asset Management System - Track and manage your IT inventory across all devices" />
+    <meta property="og:image" content="/pwa-512x512.svg" />
+    
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:title" content="IT Management System" />
+    <meta property="twitter:description" content="IT Asset Management System - Track and manage your IT inventory across all devices" />
+    <meta property="twitter:image" content="/pwa-512x512.svg" />
+    
+    <!-- Preconnect to important origins -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    
+    <!-- iOS Splash Screens -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <link rel="apple-touch-startup-image" href="/pwa-512x512.svg" />
+    
+    <!-- Prevent content shift on mobile -->
+    <style>
+      /* Critical CSS for PWA - theme-based UI */
+      html {
+        color-scheme: dark;
+      }
+      html, body {
+        margin: 0;
+        padding: 0;
+        min-height: 100vh;
+        min-height: 100dvh;
+        overscroll-behavior: none;
+        -webkit-overflow-scrolling: touch;
+        background-color: #0f172a;
+      }
+      
+      /* Ensure html element has solid background for rotation */
+      html {
+        background: #0f172a;
+      }
+      
+      /* Safe area insets for notched devices */
+      body {
+        padding-top: env(safe-area-inset-top);
+        padding-right: env(safe-area-inset-right);
+        padding-bottom: env(safe-area-inset-bottom);
+        padding-left: env(safe-area-inset-left);
+        background: linear-gradient(to bottom right, #0f172a, #1e293b, #0f172a);
+      }
+      
+      /* Smooth scroll behavior */
+      html {
+        scroll-behavior: smooth;
+      }
+      
+      /* Prevent pull-to-refresh on mobile */
+      body {
+        overscroll-behavior-y: contain;
+      }
+      
+      /* Instant background while app initializes - no animation delay */
+      #root:empty {
+        min-height: 100vh;
+        min-height: 100dvh;
+        background: #0f172a;
+      }
+      
+      /* Fix for 100vh on mobile browsers */
+      @supports (height: 100dvh) {
+        html, body, #root:empty {
+          min-height: 100dvh;
+        }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+    
+    <!-- PWA Install Prompt Handler -->
+    <script>
+      // Register service worker update handler
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.ready.then(registration => {
+            console.log('PWA: Service Worker is ready');
+          });
+        });
+      }
+      
+      // Handle PWA install prompt
+      let deferredPrompt;
+      window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        // Store for later use
+        window.deferredPrompt = deferredPrompt;
+        console.log('PWA: Install prompt available');
+      });
+      
+      // Track successful install
+      window.addEventListener('appinstalled', () => {
+        deferredPrompt = null;
+        window.deferredPrompt = null;
+        console.log('PWA: App was installed');
+      });
+    </script>
   </body>
 </html>

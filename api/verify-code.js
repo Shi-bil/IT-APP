@@ -1,27 +1,23 @@
 import 'dotenv/config';
-import Parse from 'parse/node.js';
-
-Parse.initialize(process.env.PARSE_APP_ID, process.env.PARSE_JS_KEY);
-Parse.serverURL = process.env.PARSE_SERVER_URL;
-Parse.masterKey = process.env.PARSE_MASTER_KEY;
+import connectToDatabase from './_db.js';
+import EmailCode from './models/EmailCode.js';
+import User from './models/User.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.writeHead(405, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: 'Method Not Allowed' }));
 
   const { email, code } = req.body || {};
   try {
-    const EmailCode = Parse.Object.extend('EmailCode');
-    const query = new Parse.Query(EmailCode);
-    query.equalTo('email', email);
-    query.descending('createdAt');
-    const emailCodeObj = await query.first();
+    await connectToDatabase();
+
+    const emailCodeObj = await EmailCode.findOne({ email }).sort({ createdAt: -1 }).lean();
     if (!emailCodeObj) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ success: false, error: 'No code found for this email.' }));
     }
 
-    const savedCode = emailCodeObj.get('code');
-    const expiresAt = emailCodeObj.get('expiresAt');
+    const savedCode = emailCodeObj.code;
+    const expiresAt = emailCodeObj.expiresAt;
     if (!savedCode || savedCode !== code) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ success: false, error: 'Invalid verification code.' }));
@@ -31,13 +27,11 @@ export default async function handler(req, res) {
       return res.end(JSON.stringify({ success: false, error: 'Verification code expired.' }));
     }
 
-    const userQuery = new Parse.Query(Parse.User);
-    userQuery.equalTo('email', email);
-    const user = await userQuery.first({ useMasterKey: true });
-    if (user) {
-      user.set('emailVerified', true);
-      await user.save(null, { useMasterKey: true });
-    }
+    // Mark user's emailVerified = true
+    await User.updateOne({ email }, { $set: { emailVerified: true } });
+
+    // Optionally mark code as used
+    await EmailCode.updateOne({ _id: emailCodeObj._id }, { $set: { usedAt: new Date() } });
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ success: true }));

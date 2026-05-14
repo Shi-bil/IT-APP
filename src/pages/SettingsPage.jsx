@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Settings, User, Shield, Database, Globe, Save, Eye, EyeOff, CalendarCheck, CalendarClock, CheckCircle, UserCog } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import parseService from '../services/parseService';
+import axios from 'axios';
 
 const SettingsPage = () => {
   const { user: authUser, logout } = useAuth();
@@ -91,17 +91,15 @@ const SettingsPage = () => {
 
   useEffect(() => {
     async function fetchUser() {
-      const freshUser = await parseService.getCurrentUser();
-      if (freshUser) {
-        setUser(freshUser);
-        setFullname(freshUser.fullname || '');
-        setEmail(freshUser.email || '');
-        setDepartment(freshUser.department || '');
-        setPhone(freshUser.phone || '');
-      }
+      // Refresh from saved session
+      setUser(authUser);
+      setFullname(authUser?.fullname || '');
+      setEmail(authUser?.email || '');
+      setDepartment(authUser?.department || '');
+      setPhone(authUser?.phone || '');
     }
     fetchUser();
-  }, []);
+  }, [authUser]);
 
   const handleProfileSave = async (e) => {
     e.preventDefault();
@@ -114,13 +112,14 @@ const SettingsPage = () => {
     
     setSaving(true);
     setMessage('');
-    const result = await parseService.updateCurrentUserProfile({ fullname, email, department, phone });
-    if (result.success) {
+    try {
+      const token = localStorage.getItem('auth_token');
+      await axios.put('/api/me/update', { fullname, email, department, phone }, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       setMessage('Profile updated successfully!');
-      const freshUser = await parseService.getCurrentUser();
-      if (freshUser) setUser(freshUser);
-    } else {
-      setMessage(result.error || 'Failed to update profile.');
+    } catch (err) {
+      setMessage(err.response?.data?.error || 'Failed to update profile.');
     }
     setSaving(false);
   };
@@ -144,8 +143,12 @@ const SettingsPage = () => {
       return;
     }
     
-    const result = await parseService.changePassword(currentPassword, newPassword);
-    if (result.success) {
+    try {
+      const token = localStorage.getItem('auth_token');
+      const res = await axios.post('/api/me/change-password', { currentPassword, newPassword }, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.data?.success) {
       setPasswordMessage('Password changed successfully! Redirecting to login...');
       // Clear password fields
       setCurrentPassword('');
@@ -157,8 +160,11 @@ const SettingsPage = () => {
         await logout();
         navigate('/login');
       }, 2000);
-    } else {
-      setPasswordMessage(result.error || 'Failed to change password.');
+      } else {
+        setPasswordMessage(res.data?.error || 'Failed to change password.');
+      }
+    } catch (err) {
+      setPasswordMessage(err.response?.data?.error || 'Failed to change password.');
     }
     setChangingPassword(false);
   };
@@ -307,6 +313,7 @@ const SettingsPage = () => {
                 onChange={(e) => setCurrentPassword(e.target.value)}
                 className="input-field w-full pr-10"
                 placeholder="Enter current password"
+                autoComplete="current-password"
                 required
               />
               <button
@@ -327,6 +334,7 @@ const SettingsPage = () => {
                 onChange={(e) => setNewPassword(e.target.value)}
                 className="input-field w-full pr-10"
                 placeholder="Enter new password"
+                autoComplete="new-password"
                 required
               />
               <button
@@ -346,6 +354,7 @@ const SettingsPage = () => {
               onChange={(e) => setConfirmPassword(e.target.value)}
               className="input-field w-full"
               placeholder="Confirm new password"
+              autoComplete="new-password"
               required
             />
           </div>

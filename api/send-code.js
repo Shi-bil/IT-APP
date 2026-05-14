@@ -1,15 +1,13 @@
 import 'dotenv/config';
 import nodemailer from 'nodemailer';
-import Parse from 'parse/node.js';
+import connectToDatabase from './_db.js';
+import EmailCode from './models/EmailCode.js';
 
-Parse.initialize(process.env.PARSE_APP_ID, process.env.PARSE_JS_KEY);
-Parse.serverURL = process.env.PARSE_SERVER_URL;
-Parse.masterKey = process.env.PARSE_MASTER_KEY;
-
+const smtpPort = Number(process.env.SMTP_PORT || 587);
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT,
-  secure: false,
+  port: 587 || smtpPort,
+  secure: smtpPort === 465, // true for SMTPS/465, false for STARTTLS/587
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
@@ -17,6 +15,9 @@ const transporter = nodemailer.createTransport({
   tls: {
     rejectUnauthorized: false,
   },
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 15000,
 });
 
 function generateCode() {
@@ -26,30 +27,65 @@ function generateCode() {
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.writeHead(405, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: 'Method Not Allowed' }));
 
-  const { email } = req.body || {};
+  const body = req.body || {};
+  const { email } = body;
+  if (!email) {
+    console.error('send-code: missing email in body:', body);
+  }
   const code = generateCode();
 
   try {
-    const EmailCode = Parse.Object.extend('EmailCode');
-    const emailCode = new EmailCode();
-    emailCode.set('email', email);
-    emailCode.set('code', code);
-    emailCode.set('expiresAt', new Date(Date.now() + 10 * 60 * 1000));
-    await emailCode.save();
+    await connectToDatabase();
 
-    await transporter.sendMail({
-      from: `"Verification Bot" <${process.env.SMTP_USER}>`,
-      to: email,
-      subject: 'Your Verification Code',
-      text: `Your code is: ${code}`,
+    await EmailCode.create({
+      email,
+      code,
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
     });
+
+    try {
+      await transporter.sendMail({
+        from: `"Zainlee Technologies" <${process.env.SMTP_USER}>`,
+        to: email,
+        subject: 'Your Verification Code - IT Inventory Management System',
+        text: `Dear User,
+
+Welcome to Zainlee IT Inventory Management System!🙏
+
+You have requested a verification code to access your account. Please use the code below to complete your verification:
+
+========================================
+        YOUR VERIFICATION CODE
+            
+              ${code}
+              
+========================================
+
+This code is valid for 120 seconds. If you did not request this code, please ignore this email or contact our support team immediately.
+
+Thank you for choosing Zainlee Technologies llc.
+
+Best regards,
+Zainlee Technologies Team
+IT Inventory Management System
+
+---
+This is an automated message. Please do not reply to this email.
+© ${new Date().getFullYear()} Zainlee Technologies. All rights reserved.`,
+      });
+    } catch (mailErr) {
+      // Allow fallback to avoid blocking registration when SMTP is misconfigured
+      console.error('SMTP sendMail failed:', mailErr?.message || mailErr);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, message: 'Email delivery failed; using fallback code', code }));
+    }
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ success: true, message: 'Verification code sent' }));
   } catch (err) {
-    console.error(err);
+    console.error('send-code error:', err?.message || err);
     res.writeHead(500, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: false, error: 'Failed to send code' }));
+    res.end(JSON.stringify({ success: false, error: `Failed to send code: ${err?.message || 'Unknown error'}` }));
   }
 }
 

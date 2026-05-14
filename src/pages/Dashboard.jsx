@@ -1,17 +1,21 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { 
-  Package, 
-  Users, 
-  Ticket, 
-  Shield, 
-  TrendingUp, 
-  Activity, 
+import {
+  Package,
+  Users,
+  Ticket,
+  Shield,
+  TrendingUp,
+  Activity,
   AlertTriangle,
   Clock,
   BarChart3,
   XCircle,
-  ChevronRight
+  ChevronRight,
+  Server,
+  Calendar,
+  HardDrive,
+  Sparkles
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { useAuth } from '../contexts/AuthContext';
@@ -21,7 +25,10 @@ import { ticketService } from '../services/ticketService';
 import { credentialService } from '../services/credentialService';
 import vpsService from '../services/vpsService';
 import subscriptionService from '../services/subscriptionService';
+import objectStorageService from '../services/objectStorageService';
+import aiAccountService from '../services/aiAccountService';
 import PaymentCalendar, { expandDueDates, findPaymentForMonth } from '../components/PaymentCalendar';
+import useTabRefresh from '../hooks/useTabRefresh';
 
 const Dashboard = () => {
   const location = useLocation();
@@ -45,16 +52,19 @@ const Dashboard = () => {
   const [solvedTicketCount, setSolvedTicketCount] = useState(0);
   const [vpsList, setVpsList] = useState([]);
   const [subscriptionsList, setSubscriptionsList] = useState([]);
+  const [storageList, setStorageList] = useState([]);
+  const [aiAccountsList, setAiAccountsList] = useState([]);
   const [viewedMonth, setViewedMonth] = useState(() => {
     const now = new Date();
     return { year: now.getFullYear(), month: now.getMonth() };
   });
 
-  // Combined feed fed into PaymentCalendar — both sources, same shape.
+  // Combined feed fed into PaymentCalendar — all three sources, same shape.
   const calendarItems = useMemo(() => [
     ...vpsList.map((v) => ({ ...v, kind: 'vps' })),
     ...subscriptionsList.map((s) => ({ ...s, kind: 'subscription' })),
-  ], [vpsList, subscriptionsList]);
+    ...storageList.map((o) => ({ ...o, kind: 'storage' })),
+  ], [vpsList, subscriptionsList, storageList]);
 
   const formatCurrency = (value, currency = 'USD') =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(Number(value) || 0);
@@ -105,20 +115,39 @@ const Dashboard = () => {
   const isViewingCurrentMonth =
     viewedMonth.year === new Date().getFullYear() && viewedMonth.month === new Date().getMonth();
 
-  const loadVpsForCalendar = async () => {
-    const result = await vpsService.getAllVps();
+  const loadVpsForCalendar = async ({ force = false } = {}) => {
+    const result = await vpsService.getAllVps({ force });
     if (result.success) setVpsList(result.vps || []);
   };
 
-  const loadSubscriptionsForCalendar = async () => {
-    const result = await subscriptionService.getAllSubscriptions();
+  const loadSubscriptionsForCalendar = async ({ force = false } = {}) => {
+    const result = await subscriptionService.getAllSubscriptions({ force });
     if (result.success) setSubscriptionsList(result.subscriptions || []);
+  };
+
+  const loadStorageForCalendar = async ({ force = false } = {}) => {
+    const result = await objectStorageService.getAll({ force });
+    if (result.success) setStorageList(result.items || []);
+  };
+
+  const loadAiAccounts = async ({ force = false } = {}) => {
+    const result = await aiAccountService.getAll({ force });
+    if (result.success) setAiAccountsList(result.accounts || []);
   };
 
   useEffect(() => {
     loadVpsForCalendar();
     loadSubscriptionsForCalendar();
-  }, []);
+    loadStorageForCalendar();
+    if (isAdmin) loadAiAccounts();
+  }, [isAdmin]);
+
+  useTabRefresh(() => {
+    loadVpsForCalendar({ force: true });
+    loadSubscriptionsForCalendar({ force: true });
+    loadStorageForCalendar({ force: true });
+    if (isAdmin) loadAiAccounts({ force: true });
+  });
 
 
   // Add a metric for non-admins: My Assets
@@ -321,6 +350,46 @@ const Dashboard = () => {
       icon: Users,
       color: 'from-green-500 to-emerald-500',
       route: '/users'
+    },
+    {
+      title: 'VPS',
+      shortTitle: 'VPS',
+      value: vpsList.length,
+      change: '+0%',
+      trend: 'up',
+      icon: Server,
+      color: 'from-teal-500 to-cyan-500',
+      route: '/vps'
+    },
+    {
+      title: 'Subscriptions',
+      shortTitle: 'SUBS',
+      value: subscriptionsList.length,
+      change: '+0%',
+      trend: 'up',
+      icon: Calendar,
+      color: 'from-yellow-500 to-amber-500',
+      route: '/subscriptions'
+    },
+    {
+      title: 'Object Storage',
+      shortTitle: 'STORAGE',
+      value: storageList.length,
+      change: '+0%',
+      trend: 'up',
+      icon: HardDrive,
+      color: 'from-pink-500 to-fuchsia-500',
+      route: '/object-storage'
+    },
+    {
+      title: 'Live Credits',
+      shortTitle: 'AI CREDITS',
+      value: aiAccountsList.length,
+      change: '+0%',
+      trend: 'up',
+      icon: Sparkles,
+      color: 'from-fuchsia-500 to-violet-500',
+      route: '/ai-credits'
     }
   ];
 
@@ -509,7 +578,7 @@ const Dashboard = () => {
       )}
 
       {/* Payment Overview — VPS stats + calendar — Admin only, read-only */}
-      {isAdmin ? (
+      {isAdmin && calendarItems.length > 0 ? (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-xl sm:text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">

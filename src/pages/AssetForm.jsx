@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, Laptop, Smartphone, Tablet, Signal, Car, Boxes, Zap } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Laptop, Smartphone, Tablet, Signal, Car, Boxes, Zap, Upload } from 'lucide-react';
 import { assetService } from '../services/assetService';
+import ImportAssetsModal from '../components/ImportAssetsModal';
+import SuggestInput from '../components/SuggestInput';
 
 const AssetForm = () => {
   const navigate = useNavigate();
@@ -12,11 +14,17 @@ const AssetForm = () => {
     serialNumber: '',
     status: 'free',
     quantity: 1,
-    remark: ''
+    remark: '',
+    userName: '',
+    // SIM-specific fields
+    simType: '',
+    plan: ''
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [errors, setErrors] = useState({});
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [allAssets, setAllAssets] = useState([]);
 
   const isEditing = Boolean(assetId);
 
@@ -35,6 +43,23 @@ const AssetForm = () => {
       fetchAsset();
     }
   }, [assetId, isEditing]);
+
+  useEffect(() => {
+    let cancelled = false;
+    assetService.getAllAssets().then((result) => {
+      if (cancelled) return;
+      const list = Array.isArray(result) ? result : (result?.assets || result?.data || []);
+      setAllAssets(list);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const suggestions = useMemo(() => ({
+    name: allAssets.map((a) => a.name),
+    serialNumber: allAssets.map((a) => a.serialNumber),
+    plan: allAssets.map((a) => a.plan),
+    userName: allAssets.map((a) => a.userName),
+  }), [allAssets]);
 
   const categories = [
     { id: '1', name: 'Laptops', icon: <Laptop className="w-8 h-8 text-blue-400" /> },
@@ -94,13 +119,23 @@ const AssetForm = () => {
     if (!asset.name.trim()) newErrors.name = 'This field is required.';
     if (!asset.serialNumber.trim()) newErrors.serialNumber = 'This field is required.';
     if (selectedConfig.showQuantity && (!asset.quantity || asset.quantity < 1)) newErrors.quantity = 'Quantity must be at least 1.';
+    if (asset.status === 'using' && !asset.userName.trim()) newErrors.userName = 'User name is required when status is "Using".';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setAsset(prevState => ({ ...prevState, [name]: value }));
+    
+    // Auto-set status to "using" when userName is entered
+    if (name === 'userName' && value.trim() !== '' && asset.status !== 'using') {
+      setAsset(prevState => ({ ...prevState, [name]: value, status: 'using' }));
+    }
+    // Keep userName when status changes (don't clear it automatically)
+    else {
+      setAsset(prevState => ({ ...prevState, [name]: value }));
+    }
+    
     if (errors[name]) {
       setErrors(prevErrors => ({ ...prevErrors, [name]: null }));
     }
@@ -121,14 +156,20 @@ const AssetForm = () => {
     setLoading(true);
     setError(null);
     try {
+      let result;
       if (isEditing) {
-        await assetService.updateAsset(assetId, asset);
+        result = await assetService.updateAsset(assetId, asset);
       } else {
-        await assetService.createAsset(asset);
+        result = await assetService.createAsset(asset);
       }
-      navigate('/assets');
+      
+      if (result.success) {
+        navigate('/assets');
+      } else {
+        setError(result.error || 'Failed to save asset. Please try again.');
+      }
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'An unexpected error occurred.');
     } finally {
       setLoading(false);
     }
@@ -164,9 +205,19 @@ const AssetForm = () => {
             {isEditing ? 'Update the details of the existing asset.' : 'Fill in the form to add a new asset.'}
           </p>
         </div>
-        <button className="btn-secondary backdrop-blur-sm hover:scale-105 transition-all" onClick={goBack}>
-          <ArrowLeft className="w-4 h-4 inline-block mr-1" /> Back
-        </button>
+        <div className="flex items-center gap-2 sm:gap-3">
+          {!isEditing && (
+            <button 
+              className="btn-primary bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 hover:scale-105 transition-all duration-300" 
+              onClick={() => setShowImportModal(true)}
+            >
+              <Upload className="w-4 h-4 inline-block mr-1" /> Import Excel
+            </button>
+          )}
+          <button className="btn-secondary backdrop-blur-sm hover:scale-105 transition-all" onClick={goBack}>
+            <ArrowLeft className="w-4 h-4 inline-block mr-1" /> Back
+          </button>
+        </div>
       </div>
 
       <form onSubmit={handleSubmit} className="animate-fade-up">
@@ -219,7 +270,8 @@ const AssetForm = () => {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-300 mb-2">{selectedConfig.nameLabel}</label>
-                    <input
+                    <SuggestInput
+                      suggestions={suggestions.name}
                       type="text"
                       name="name"
                       value={asset.name}
@@ -231,7 +283,8 @@ const AssetForm = () => {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-300 mb-2">{selectedConfig.serialLabel}</label>
-                    <input
+                    <SuggestInput
+                      suggestions={suggestions.serialNumber}
                       type="text"
                       name="serialNumber"
                       value={asset.serialNumber}
@@ -256,6 +309,60 @@ const AssetForm = () => {
                       {errors.quantity && <p className="text-red-400 text-sm mt-1">{errors.quantity}</p>}
                     </div>
                   )}
+                  
+                  {/* SIM-specific fields - shows only for SIMs category */}
+                  {asset.categoryId === '4' && (
+                    <>
+                      <div className="animate-fade-in">
+                        <label className="block text-sm font-medium text-slate-300 mb-2">SIM Type</label>
+                        <select
+                          name="simType"
+                          value={asset.simType}
+                          onChange={handleInputChange}
+                          className="input-field w-full bg-slate-800/50 border border-slate-700/50 focus:border-cyan-500/50 focus:ring focus:ring-cyan-500/20 transition-all duration-300"
+                        >
+                          <option value="">Select Type...</option>
+                          <option value="postpaid">Postpaid</option>
+                          <option value="prepaid">Prepaid</option>
+                        </select>
+                      </div>
+                      <div className="animate-fade-in">
+                        <label className="block text-sm font-medium text-slate-300 mb-2">Plan</label>
+                        <SuggestInput
+                          suggestions={suggestions.plan}
+                          type="text"
+                          name="plan"
+                          value={asset.plan}
+                          onChange={handleInputChange}
+                          className="input-field w-full bg-slate-800/50 border border-slate-700/50 focus:border-cyan-500/50 focus:ring focus:ring-cyan-500/20 transition-all duration-300"
+                          placeholder="E.g. Business Plan 100GB"
+                        />
+                      </div>
+                    </>
+                  )}
+                  
+                  {/* Assigned To (User Name) field - always visible, required when status is "using" */}
+                  <div className="animate-fade-in">
+                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                      Assigned To {asset.status === 'using' && <span className="text-red-400">*</span>}
+                    </label>
+                    <SuggestInput
+                      suggestions={suggestions.userName}
+                      type="text"
+                      name="userName"
+                      value={asset.userName}
+                      onChange={handleInputChange}
+                      className={`input-field w-full bg-slate-800/50 border ${errors.userName ? 'border-red-500' : 'border-slate-700/50'} focus:border-cyan-500/50 focus:ring focus:ring-cyan-500/20 transition-all duration-300`}
+                      placeholder={asset.status === 'using' ? "Enter the user's name (required)" : "Enter the user's name (optional)"}
+                    />
+                    {errors.userName && <p className="text-red-400 text-sm mt-1">{errors.userName}</p>}
+                    {asset.status !== 'using' && asset.userName && (
+                      <p className="text-xs text-cyan-400 mt-1">
+                        Note: Status will be set to "Using" if a user name is assigned
+                      </p>
+                    )}
+                  </div>
+                  
                   <div>
                     <label className="block text-sm font-medium text-slate-300 mb-2">Remark (Optional)</label>
                     <textarea
@@ -295,6 +402,19 @@ const AssetForm = () => {
         <div className="bg-red-500/20 text-red-300 p-4 rounded-lg mt-4 border border-red-500/30 shadow-glow-error animate-fade-in">
           <p><strong>Error:</strong> {error}</p>
         </div>
+      )}
+
+      {/* Import Assets Modal */}
+      {showImportModal && (
+        <ImportAssetsModal 
+          isOpen={showImportModal}
+          onClose={() => setShowImportModal(false)}
+          onImportComplete={() => {
+            setShowImportModal(false);
+            navigate('/assets');
+          }}
+          categories={categories}
+        />
       )}
     </div>
   );

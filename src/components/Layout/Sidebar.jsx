@@ -10,20 +10,36 @@ import {
   Menu,
   Database,
   Activity,
+  CreditCard,
+  Server,
+  HardDrive,
+  CalendarDays,
+  Sparkles,
+  Rocket,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTickets } from '../../contexts/TicketContext';
+import { usePayments } from '../../contexts/PaymentsContext';
 
 const Sidebar = ({ collapsed, onToggle, mobileOpen, onMobileClose }) => {
   const location = useLocation();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const { ticketCount } = useTickets();
+  const { unpaidCount } = usePayments();
 
   // Define all menu items
   const allMenuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', roles: ['admin', 'employee'] },
     { icon: Package, label: 'Assets', path: '/assets', roles: ['admin', 'employee'] },
     { icon: Shield, label: 'Credentials', path: '/credentials', roles: ['admin'] },
-    { icon: Ticket, label: 'Tickets', path: '/tickets', roles: ['admin', 'employee'] },
+    { icon: CreditCard, label: 'Subscriptions', path: '/subscriptions', roles: ['admin'] },
+    { icon: Server, label: 'VPS', path: '/vps', roles: ['admin'] },
+    { icon: HardDrive, label: 'Object Storage', path: '/object-storage', roles: ['admin'] },
+    { icon: Sparkles, label: 'Live Credits', path: '/ai-credits', roles: ['admin'] },
+    { icon: CalendarDays, label: 'Payments', path: '/payments', roles: ['admin'], badge: unpaidCount },
+    { icon: Ticket, label: 'Tickets', path: '/tickets', roles: ['admin', 'employee'], badge: isAdmin ? ticketCount : null },
+    { icon: Rocket, label: 'DevKitchen', path: '/projects', roles: ['admin', 'employee'] },
     { icon: Users, label: 'Users', path: '/users', roles: ['admin'] },
     { icon: Settings, label: 'Settings', path: '/settings', roles: ['admin', 'employee'] },
   ];
@@ -75,7 +91,8 @@ const Sidebar = ({ collapsed, onToggle, mobileOpen, onMobileClose }) => {
         <nav className="p-4 space-y-2">
           {menuItems.map((item) => {
             const Icon = item.icon;
-            const isActive = location.pathname === item.path;
+            const isActive = location.pathname === item.path || location.pathname.startsWith(item.path + '/');
+            const showBadge = item.badge !== null && item.badge !== undefined && item.badge > 0;
             
             return (
               <Link
@@ -90,7 +107,14 @@ const Sidebar = ({ collapsed, onToggle, mobileOpen, onMobileClose }) => {
                 {isActive && (
                   <div className="absolute left-0.2 top-0.2 bottom-0.2 w-1 bg-gradient-to-b from-cyan-400 to-blue-500 rounded-r-full"></div>
                 )}
+                <div className="relative">
                 <Icon className={`${collapsed ? 'w-12 h-12' : 'w-5 h-5'} transition-all duration-200 ${isActive ? 'text-cyan-300' : ''}`} />
+                  {showBadge && (
+                    <div className="absolute -top-2 -right-2 min-w-[1.25rem] h-5 bg-gradient-to-r from-red-500 to-red-600 rounded-full flex items-center justify-center px-1.5 shadow-lg shadow-red-500/50 animate-pulse">
+                      <span className="text-xs font-bold text-white">{item.badge > 99 ? '99+' : item.badge}</span>
+                    </div>
+                  )}
+                </div>
                 {!collapsed && (
                   <span className="font-medium transition-colors">{item.label}</span>
                 )}
@@ -104,28 +128,6 @@ const Sidebar = ({ collapsed, onToggle, mobileOpen, onMobileClose }) => {
           })}
         </nav>
 
-        {!collapsed && (
-          <div className="absolute bottom-4 left-4 right-4">
-            <div className="glass-morphism p-4 rounded-xl">
-              <div className="flex items-center space-x-3 mb-2">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-r from-green-400 to-emerald-500 flex items-center justify-center">
-                  <Activity className="w-4 h-4 text-white" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-white">
-                    {user?.fullname || 'User'}
-                  </p>
-                  <p className="text-xs text-green-400">
-                    {isAdmin ? 'Administrator' : 'Employee'}
-                  </p>
-                </div>
-              </div>
-              <div className="w-full bg-slate-700 rounded-full h-2">
-                <div className="bg-gradient-to-r from-green-400 to-emerald-500 h-2 rounded-full w-4/5"></div>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
       {/* Mobile drawer sidebar */}
       <div
@@ -156,7 +158,8 @@ const Sidebar = ({ collapsed, onToggle, mobileOpen, onMobileClose }) => {
         <nav className="p-4 space-y-2">
           {menuItems.map((item) => {
             const Icon = item.icon;
-            const isActive = location.pathname === item.path;
+            const isActive = location.pathname === item.path || location.pathname.startsWith(item.path + '/');
+            const showBadge = item.badge !== null && item.badge !== undefined && item.badge > 0;
             return (
               <Link
                 key={item.path}
@@ -171,7 +174,14 @@ const Sidebar = ({ collapsed, onToggle, mobileOpen, onMobileClose }) => {
                 {isActive && (
                   <div className="absolute left-0.2 top-0.2 bottom-0.2 w-1 bg-gradient-to-b from-cyan-400 to-blue-500 rounded-r-full"></div>
                 )}
+                <div className="relative">
                 <Icon className={`w-5 h-5 transition-all duration-200 ${isActive ? 'text-cyan-300' : ''}`} />
+                  {showBadge && (
+                    <div className="absolute -top-2 -right-2 min-w-[1.25rem] h-5 bg-gradient-to-r from-red-500 to-red-600 rounded-full flex items-center justify-center px-1.5 shadow-lg shadow-red-500/50 animate-pulse">
+                      <span className="text-xs font-bold text-white">{item.badge > 99 ? '99+' : item.badge}</span>
+                    </div>
+                  )}
+                </div>
                 <span className="font-medium transition-colors">{item.label}</span>
                 {isActive && (
                   <div className="ml-auto">
@@ -182,26 +192,6 @@ const Sidebar = ({ collapsed, onToggle, mobileOpen, onMobileClose }) => {
             );
           })}
         </nav>
-        <div className="absolute bottom-4 left-4 right-4">
-          <div className="glass-morphism p-4 rounded-xl">
-            <div className="flex items-center space-x-3 mb-2">
-              <div className="w-8 h-8 rounded-full bg-gradient-to-r from-green-400 to-emerald-500 flex items-center justify-center">
-                <Activity className="w-4 h-4 text-white" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-white">
-                  {user?.fullname || 'User'}
-                </p>
-                <p className="text-xs text-green-400">
-                  {isAdmin ? 'Administrator' : 'Employee'}
-                </p>
-              </div>
-            </div>
-            <div className="w-full bg-slate-700 rounded-full h-2">
-              <div className="bg-gradient-to-r from-green-400 to-emerald-500 h-2 rounded-full w-4/5"></div>
-            </div>
-          </div>
-        </div>
       </div>
     </>
   );

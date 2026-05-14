@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Plus, Search, Filter, MoreHorizontal, Edit, Trash2, Eye, Mail, Phone, MapPin, RotateCcw, Package, FolderKanban, FileText } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { Users, Plus, Search, Filter, MoreHorizontal, Edit, Trash2, Eye, Mail, Phone, MapPin, RotateCcw, Package, FolderKanban, FileText, UserCheck, UserPlus, Shield } from 'lucide-react';
 import { userService } from '../services/userService';
 import AllAssetsView from '../components/AllAssetsView';
 import { assetService } from '../services/assetService';
 
 const UsersPage = () => {
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchParams] = useSearchParams();
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
   const [selectedRole, setSelectedRole] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [users, setUsers] = useState([]);
@@ -57,12 +59,22 @@ const UsersPage = () => {
       setLoading(true);
       const result = await userService.getAllUsers();
       if (result.success) {
+        console.log('Fetched users:', result.users);
+        console.log('First user structure:', result.users[0]);
         setUsers(result.users);
       }
       setLoading(false);
     };
     fetchUsers();
   }, []);
+
+  // Update search query from URL params
+  useEffect(() => {
+    const urlSearch = searchParams.get('search');
+    if (urlSearch) {
+      setSearchQuery(urlSearch);
+    }
+  }, [searchParams]);
 
   const getRoleBadge = (role) => {
     const roleClasses = {
@@ -74,6 +86,24 @@ const UsersPage = () => {
       <span className={`px-2 py-1 rounded-full text-xs font-medium border ${roleClasses[role]}`}>
         {role ? role.charAt(0).toUpperCase() + role.slice(1) : 'User'}
       </span>
+    );
+  };
+
+  // Highlight search match with transparent yellow
+  const highlightSearch = (text, search) => {
+    if (!text || typeof text !== 'string') return text;
+    const q = search && search.trim();
+    if (!q) return text;
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(${escaped})`, 'gi');
+    const parts = String(text).split(regex);
+    if (parts.length === 1) return text;
+    return parts.map((part, i) =>
+      i % 2 === 1 ? (
+        <span key={i} className="bg-yellow-400/25 rounded px-0.5">{part}</span>
+      ) : (
+        part
+      )
     );
   };
 
@@ -119,10 +149,17 @@ const UsersPage = () => {
       user.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       user.username?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesRole = selectedRole === 'all' || user.role === selectedRole;
+    
+    // Check if user was created this month
+    const now = new Date();
+    const createdDate = new Date(user.createdAt);
+    const isNewThisMonth = createdDate.getMonth() === now.getMonth() && createdDate.getFullYear() === now.getFullYear();
+    
     const matchesStatus =
       selectedStatus === 'all' ||
-                         (selectedStatus === 'active' && user.isActive) ||
-                         (selectedStatus === 'inactive' && !user.isActive);
+      (selectedStatus === 'active' && user.isActive) ||
+      (selectedStatus === 'inactive' && !user.isActive) ||
+      (selectedStatus === 'new' && isNewThisMonth);
     return matchesSearch && matchesRole && matchesStatus;
   });
 
@@ -206,7 +243,15 @@ const UsersPage = () => {
     if (!deleteUser) return;
     setDeleteLoading(true);
     setDeleteError('');
-    const result = await userService.deleteUser(deleteUser.id);
+    // Use id or _id as fallback
+    const userId = deleteUser.id || deleteUser._id;
+    console.log('Attempting to delete user:', { id: userId, user: deleteUser });
+    if (!userId) {
+      setDeleteError('User ID is missing');
+      setDeleteLoading(false);
+      return;
+    }
+    const result = await userService.deleteUser(userId);
     setDeleteLoading(false);
     if (result.success) {
       setDeleteUser(null);
@@ -218,27 +263,32 @@ const UsersPage = () => {
     }
   };
 
-  const handlePromoteToAdmin = async () => {
+  const handlePromoteOrDemote = async () => {
     if (!promoteUserId) return;
     setPromoteLoading(true);
     setPromoteError('');
     setPromoteSuccess('');
-    const userToPromote = users.find(u => u.id === promoteUserId);
-    if (!userToPromote) {
+    const selectedUser = users.find(u => u.id === promoteUserId || u._id === promoteUserId);
+    if (!selectedUser) {
       setPromoteError('User not found.');
       setPromoteLoading(false);
       return;
     }
-    const result = await userService.updateUser({ ...userToPromote, role: 'admin' });
+    const isAdmin = selectedUser.role === 'admin';
+    const newRole = isAdmin ? 'employee' : 'admin';
+    const result = await userService.updateUser({ ...selectedUser, role: newRole });
     setPromoteLoading(false);
     if (result.success) {
-      setPromoteSuccess(`${userToPromote.fullname} has been promoted to Admin.`);
+      setPromoteSuccess(isAdmin 
+        ? `${selectedUser.fullname} has been demoted to Employee.`
+        : `${selectedUser.fullname} has been promoted to Admin.`
+      );
       setPromoteUserId('');
       // Refresh users
       const refreshed = await userService.getAllUsers();
       if (refreshed.success) setUsers(refreshed.users);
     } else {
-      setPromoteError(result.error || 'Failed to promote user');
+      setPromoteError(result.error || (isAdmin ? 'Failed to demote user' : 'Failed to promote user'));
     }
   };
 
@@ -258,59 +308,94 @@ const UsersPage = () => {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 animate-fade-in">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600 mb-1 sm:mb-2">Users</h1>
-          <p className="text-slate-400 text-sm sm:text-base">Manage user accounts and permissions</p>
+      <div className="flex flex-row items-center justify-between gap-2 sm:gap-4 animate-fade-in">
+        <div className="flex-shrink-0 min-w-0">
+          <h1 className="text-xl sm:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600 mb-0.5 sm:mb-2 truncate">Users</h1>
+          <p className="text-slate-400 text-xs sm:text-base truncate">Manage user accounts</p>
         </div>
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
+        <div className="flex flex-row items-center gap-2 sm:gap-3 flex-shrink-0">
           <button
-            className="btn-primary bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 hover:scale-105 transition-all duration-300 flex items-center justify-center gap-2"
+            className="btn-primary bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 hover:scale-105 transition-all duration-300 flex items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm px-2.5 sm:px-4 py-2 whitespace-nowrap"
             onClick={() => setShowAddModal(true)}
           >
-            <Plus className="w-4 h-4" />
-            Add User
+            <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="hidden xs:inline">Add User</span><span className="xs:hidden">Add</span>
           </button>
         </div>
       </div>
 
-      {/* Statistics Cards - now using real data */}
-      <div className="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-6 animate-fade-up">
-        <div className="glass-morphism p-6 rounded-xl border border-slate-700/30 shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02]">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-medium text-slate-400">Total Users</h3>
-            <Users className="w-5 h-5 text-cyan-400" />
+      {/* Statistics Cards - Compact horizontal layout - Click to filter */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4 animate-fade-up">
+        {/* Total Users Card */}
+        <div 
+          onClick={() => { setSelectedStatus('all'); setSelectedRole('all'); }}
+          className={`glass-morphism rounded-lg sm:rounded-xl border shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02] p-2 sm:p-4 flex flex-row items-center active:scale-95 cursor-pointer group ${
+            selectedStatus === 'all' && selectedRole === 'all' 
+              ? 'border-cyan-500/60 ring-2 ring-cyan-500/30 bg-cyan-500/10' 
+              : 'border-cyan-500/20'
+          }`}
+        >
+          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center bg-gradient-to-r from-cyan-500 to-blue-600 shadow-lg flex-shrink-0">
+            <Users className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
           </div>
-          <p className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">{totalUsers}</p>
-          <p className="text-sm text-green-400 mt-1">+5% from last month</p>
+          <div className="flex flex-col items-end flex-1 ml-2 sm:ml-3">
+            <span className="text-lg sm:text-xl font-bold text-white">{totalUsers}</span>
+            <span className="text-[9px] sm:text-xs text-cyan-200/80 uppercase font-medium">TOTAL</span>
+          </div>
         </div>
-        <div className="glass-morphism p-6 rounded-xl border border-slate-700/30 shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02]">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-medium text-slate-400">Active Users</h3>
-            <div className="w-2 h-2 bg-green-400 rounded-full shadow-glow-green"></div>
+
+        {/* Active Users Card */}
+        <div 
+          onClick={() => { setSelectedStatus(selectedStatus === 'active' ? 'all' : 'active'); setSelectedRole('all'); }}
+          className={`glass-morphism rounded-lg sm:rounded-xl border shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02] p-2 sm:p-4 flex flex-row items-center active:scale-95 cursor-pointer group ${
+            selectedStatus === 'active' 
+              ? 'border-green-500/60 ring-2 ring-green-500/30 bg-green-500/10' 
+              : 'border-green-500/20'
+          }`}
+        >
+          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center bg-gradient-to-r from-green-500 to-emerald-600 shadow-lg flex-shrink-0">
+            <UserCheck className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
           </div>
-          <p className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-emerald-600">{activeUsers}</p>
-          <p className="text-sm text-slate-400 mt-1">
-            {totalUsers > 0 ? Math.round((activeUsers / totalUsers) * 100) : 0}% of total
-          </p>
+          <div className="flex flex-col items-end flex-1 ml-2 sm:ml-3">
+            <span className="text-lg sm:text-xl font-bold text-white">{activeUsers}</span>
+            <span className="text-[9px] sm:text-xs text-green-200/80 uppercase font-medium">ACTIVE</span>
+          </div>
         </div>
-        <div className="glass-morphism p-6 rounded-xl border border-slate-700/30 shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02]">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-medium text-slate-400">Admins</h3>
-            <div className="w-2 h-2 bg-red-400 rounded-full shadow-glow-red"></div>
+
+        {/* Admins Card */}
+        <div 
+          onClick={() => { setSelectedRole(selectedRole === 'admin' ? 'all' : 'admin'); setSelectedStatus('all'); }}
+          className={`glass-morphism rounded-lg sm:rounded-xl border shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02] p-2 sm:p-4 flex flex-row items-center active:scale-95 cursor-pointer group ${
+            selectedRole === 'admin' 
+              ? 'border-red-500/60 ring-2 ring-red-500/30 bg-red-500/10' 
+              : 'border-red-500/20'
+          }`}
+        >
+          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center bg-gradient-to-r from-red-500 to-pink-600 shadow-lg flex-shrink-0">
+            <Shield className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
           </div>
-          <p className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-red-400 to-pink-600">{adminUsers}</p>
-          <p className="text-sm text-slate-400 mt-1">
-            {totalUsers > 0 ? Math.round((adminUsers / totalUsers) * 100) : 0}% of total
-          </p>
+          <div className="flex flex-col items-end flex-1 ml-2 sm:ml-3">
+            <span className="text-lg sm:text-xl font-bold text-white">{adminUsers}</span>
+            <span className="text-[9px] sm:text-xs text-red-200/80 uppercase font-medium">ADMINS</span>
+          </div>
         </div>
-        <div className="glass-morphism p-6 rounded-xl border border-slate-700/30 shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02]">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-medium text-slate-400">New This Month</h3>
-            <div className="w-2 h-2 bg-blue-400 rounded-full shadow-glow-blue"></div>
+
+        {/* New This Month Card */}
+        <div 
+          onClick={() => { setSelectedStatus(selectedStatus === 'new' ? 'all' : 'new'); setSelectedRole('all'); }}
+          className={`glass-morphism rounded-lg sm:rounded-xl border shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02] p-2 sm:p-4 flex flex-row items-center active:scale-95 cursor-pointer group ${
+            selectedStatus === 'new' 
+              ? 'border-blue-500/60 ring-2 ring-blue-500/30 bg-blue-500/10' 
+              : 'border-blue-500/20'
+          }`}
+        >
+          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center bg-gradient-to-r from-blue-500 to-indigo-600 shadow-lg flex-shrink-0">
+            <UserPlus className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
           </div>
-          <p className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-600">{newThisMonth}</p>
-          <p className="text-sm text-green-400 mt-1">+3 from last month</p>
+          <div className="flex flex-col items-end flex-1 ml-2 sm:ml-3">
+            <span className="text-lg sm:text-xl font-bold text-white">{newThisMonth}</span>
+            <span className="text-[9px] sm:text-xs text-blue-200/80 uppercase font-medium">NEW</span>
+          </div>
         </div>
       </div>
 
@@ -346,6 +431,7 @@ const UsersPage = () => {
               <option value="all">All Status</option>
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
+              <option value="new">New This Month</option>
             </select>
             <button
               className="border border-blue-500 text-blue-400 bg-transparent hover:bg-blue-500/10 font-medium rounded-lg px-4 py-2 ml-2 flex items-center gap-2 transition"
@@ -362,7 +448,7 @@ const UsersPage = () => {
         </div>
       </div>
 
-      {/* Promote to Admin - Compact and Aligned */}
+      {/* Promote/Demote Admin - Compact and Aligned */}
       <div className="flex items-center justify-end space-x-2 mt-2 mb-4">
         <select
           className="input-field text-sm h-8 px-3 py-1 rounded-md border border-blue-400 focus:ring-2 focus:ring-blue-500 bg-slate-900"
@@ -370,18 +456,30 @@ const UsersPage = () => {
           value={promoteUserId}
           onChange={e => setPromoteUserId(e.target.value)}
         >
-          <option value="">Select employee to promote</option>
-          {users.filter(u => u.role === 'employee').map(u => (
-            <option key={u.id} value={u.id}>{u.fullname} ({u.email})</option>
+          <option value="" key="promote-default">Select user</option>
+          {users.filter(u => u.role === 'employee' || u.role === 'admin').map(u => (
+            <option key={u.id || u._id} value={u.id || u._id}>
+              {u.fullname} ({u.email}) - {u.role === 'admin' ? 'Admin' : 'Employee'}
+            </option>
           ))}
         </select>
-        <button
-          className="btn-primary text-sm h-8 px-4 py-1 rounded-md"
-          disabled={!promoteUserId || promoteLoading}
-          onClick={handlePromoteToAdmin}
-        >
-          {promoteLoading ? 'Promoting...' : 'Promote to Admin'}
-        </button>
+        {(() => {
+          const selectedUser = users.find(u => u.id === promoteUserId || u._id === promoteUserId);
+          const isAdmin = selectedUser?.role === 'admin';
+          return (
+            <button
+              className={`text-xs sm:text-sm h-8 px-2 sm:px-4 py-1 rounded-md whitespace-nowrap ${isAdmin 
+                ? 'bg-gradient-to-r from-red-500 to-pink-600 hover:from-red-600 hover:to-pink-700 text-white' 
+                : 'btn-primary'}`}
+              disabled={!promoteUserId || promoteLoading}
+              onClick={handlePromoteOrDemote}
+            >
+              {promoteLoading 
+                ? (isAdmin ? 'Revoking...' : 'Promoting...') 
+                : (isAdmin ? 'Revoke' : 'Promote')}
+            </button>
+          );
+        })()}
         {promoteError && <span className="text-red-400 text-xs ml-2">{promoteError}</span>}
         {promoteSuccess && <span className="text-green-400 text-xs ml-2">{promoteSuccess}</span>}
       </div>
@@ -415,8 +513,8 @@ const UsersPage = () => {
                               {getInitials(user.fullname)}
                           </div>
                           <div className="min-w-0 flex-1">
-                              <h3 className="text-sm font-medium text-white truncate">{user.fullname}</h3>
-                            <p className="text-xs text-slate-400 truncate">{user.username}</p>
+                              <h3 className="text-sm font-medium text-white truncate">{highlightSearch(user.fullname, searchQuery)}</h3>
+                            <p className="text-xs text-slate-400 truncate">{highlightSearch(user.username, searchQuery)}</p>
                           </div>
                         </div>
                       </td>
@@ -441,7 +539,7 @@ const UsersPage = () => {
                         <div className="space-y-1">
                           <div className="flex items-center space-x-1">
                             <Mail className="w-3 h-3 text-slate-400 flex-shrink-0" />
-                            <span className="text-xs text-slate-300 truncate">{user.email}</span>
+                            <span className="text-xs text-slate-300 truncate">{highlightSearch(user.email, searchQuery)}</span>
                           </div>
                           {user.phone && (
                             <div className="flex items-center space-x-1">
@@ -462,7 +560,10 @@ const UsersPage = () => {
                           <button className="p-1.5 rounded-lg hover:bg-green-500/20 text-green-400 hover:text-white transition-colors" onClick={() => openEditModal(user)}>
                             <Edit className="w-4 h-4" />
                           </button>
-                          <button className="p-2 rounded-lg hover:bg-red-500/20 text-red-400 hover:text-white transition-colors" onClick={() => setDeleteUser(user)}>
+                          <button className="p-2 rounded-lg hover:bg-red-500/20 text-red-400 hover:text-white transition-colors" onClick={() => {
+                            console.log('Delete button clicked for user:', user);
+                            setDeleteUser(user);
+                          }}>
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
@@ -505,6 +606,7 @@ const UsersPage = () => {
                 <input type="password" className="input-field w-full" required
                   value={addForm.password}
                   onChange={e => setAddForm(f => ({ ...f, password: e.target.value }))}
+                  autoComplete="new-password"
                 />
               </div>
               <div>

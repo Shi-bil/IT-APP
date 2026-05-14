@@ -1,13 +1,12 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Database, Lock, User, Eye, EyeOff, Shield, Users, Mail, ArrowLeft, CheckCircle, Building, Send, Clock, Laptop } from 'lucide-react';
+import { Database, Lock, User, Eye, EyeOff, Shield, Users, Mail, ArrowLeft, CheckCircle, Building, Send, Clock, Laptop, KeyRound, RefreshCw } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import Parse from '../config/parseConfig';
 import axios from 'axios';
 
 const RegistrationSystem = () => {
   const navigate = useNavigate();
-  const { login, loginAsEmployee, register, resendVerificationEmail, sendVerificationCode, verifyEmailWithCode } = useAuth();
+  const { login, loginAsEmployee, register, resendVerificationEmail, sendVerificationCode, verifyEmailWithCode, sessionMessage, clearSessionMessage } = useAuth();
   const [currentPage, setCurrentPage] = useState('login');
   
   // Login state
@@ -26,6 +25,7 @@ const RegistrationSystem = () => {
     fullname: '',
     email: '',
     password: '',
+    confirmPassword: '',
     department: '',
     phone: '',
   });
@@ -47,6 +47,29 @@ const RegistrationSystem = () => {
   const [timeRemaining, setTimeRemaining] = useState(120);
   const [timerActive, setTimerActive] = useState(false);
 
+  // Forgot Password state
+  const [forgotPasswordIdentifier, setForgotPasswordIdentifier] = useState('');
+  const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false);
+  const [forgotPasswordError, setForgotPasswordError] = useState('');
+  const [forgotPasswordSuccess, setForgotPasswordSuccess] = useState('');
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState('');
+  
+  // Reset Password Code Verification state
+  const [resetCode, setResetCode] = useState('');
+  const [resetCodeLoading, setResetCodeLoading] = useState(false);
+  const [resetCodeError, setResetCodeError] = useState('');
+  const [resetToken, setResetToken] = useState('');
+  const [resetTimeRemaining, setResetTimeRemaining] = useState(900); // 15 minutes
+  const [resetTimerActive, setResetTimerActive] = useState(false);
+  
+  // New Password state
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
+  const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
+  const [resetPasswordError, setResetPasswordError] = useState('');
+
   // Timer effect for code expiration
   useEffect(() => {
     let timer;
@@ -66,6 +89,24 @@ const RegistrationSystem = () => {
       if (timer) clearTimeout(timer);
     };
   }, [timerActive, timeRemaining]);
+
+  // Timer effect for password reset code expiration
+  useEffect(() => {
+    let timer;
+    if (resetTimerActive && resetTimeRemaining > 0) {
+      timer = setTimeout(() => {
+        setResetTimeRemaining(prevTime => prevTime - 1);
+      }, 1000);
+    } else if (resetTimerActive && resetTimeRemaining === 0) {
+      setResetCodeError('Reset code has expired. Please request a new one.');
+      setResetTimerActive(false);
+      setCurrentPage('forgotPassword');
+    }
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [resetTimerActive, resetTimeRemaining]);
 
   const departments = [
     { value: 'Business_Development', label: 'Business Development' },
@@ -214,11 +255,133 @@ const RegistrationSystem = () => {
     }
   };
 
+  // Forgot Password handlers
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    setForgotPasswordLoading(true);
+    setForgotPasswordError('');
+    setForgotPasswordSuccess('');
+    try {
+      const response = await axios.post('/api/auth/forgot-password', { 
+        identifier: forgotPasswordIdentifier 
+      });
+      if (response.data.success) {
+        setForgotPasswordSuccess(response.data.message);
+        setForgotPasswordEmail(response.data.email || '');
+        setResetTimeRemaining(900); // 15 minutes
+        setResetTimerActive(true);
+        setCurrentPage('resetCode');
+      } else {
+        setForgotPasswordError(response.data.error || 'Failed to send reset code');
+      }
+    } catch (err) {
+      setForgotPasswordError(err.response?.data?.error || err.message || 'Failed to send reset code');
+    } finally {
+      setForgotPasswordLoading(false);
+    }
+  };
+
+  const handleVerifyResetCode = async (e) => {
+    e.preventDefault();
+    setResetCodeLoading(true);
+    setResetCodeError('');
+    try {
+      const response = await axios.post('/api/auth/verify-reset-token', {
+        identifier: forgotPasswordIdentifier,
+        code: resetCode
+      });
+      if (response.data.success) {
+        setResetToken(response.data.resetToken);
+        setCurrentPage('newPassword');
+      } else {
+        setResetCodeError(response.data.error || 'Invalid verification code');
+      }
+    } catch (err) {
+      setResetCodeError(err.response?.data?.error || err.message || 'Failed to verify code');
+    } finally {
+      setResetCodeLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    setResetPasswordError('');
+    
+    // Validation
+    if (newPassword !== confirmNewPassword) {
+      setResetPasswordError('Passwords do not match');
+      return;
+    }
+    if (newPassword.length < 8) {
+      setResetPasswordError('Password must be at least 8 characters long');
+      return;
+    }
+    const hasUpperCase = /[A-Z]/.test(newPassword);
+    const hasLowerCase = /[a-z]/.test(newPassword);
+    const hasNumber = /[0-9]/.test(newPassword);
+    if (!hasUpperCase || !hasLowerCase || !hasNumber) {
+      setResetPasswordError('Password must contain at least one uppercase letter, one lowercase letter, and one number');
+      return;
+    }
+
+    setResetPasswordLoading(true);
+    try {
+      const response = await axios.post('/api/auth/reset-password', {
+        resetToken,
+        newPassword,
+        confirmPassword: confirmNewPassword
+      });
+      if (response.data.success) {
+        // Reset all forgot password state
+        setForgotPasswordIdentifier('');
+        setResetCode('');
+        setResetToken('');
+        setNewPassword('');
+        setConfirmNewPassword('');
+        setResetTimerActive(false);
+        setCurrentPage('resetSuccess');
+      } else {
+        setResetPasswordError(response.data.error || 'Failed to reset password');
+      }
+    } catch (err) {
+      setResetPasswordError(err.response?.data?.error || err.message || 'Failed to reset password');
+    } finally {
+      setResetPasswordLoading(false);
+    }
+  };
+
+  const handleResendResetCode = async () => {
+    setForgotPasswordLoading(true);
+    setForgotPasswordError('');
+    try {
+      const response = await axios.post('/api/auth/forgot-password', { 
+        identifier: forgotPasswordIdentifier 
+      });
+      if (response.data.success) {
+        setResetCodeError('');
+        setResetTimeRemaining(900);
+        setResetTimerActive(true);
+        setForgotPasswordSuccess('A new reset code has been sent to your email.');
+      }
+    } catch (err) {
+      setForgotPasswordError(err.response?.data?.error || 'Failed to resend code');
+    } finally {
+      setForgotPasswordLoading(false);
+    }
+  };
+
+  // Format time for display (mm:ss)
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   // Main render
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950 flex items-center justify-center p-2 sm:p-4 relative overflow-hidden">
-      {/* Space Background Elements */}
-      <div className="absolute inset-0 overflow-hidden">
+    <div className="fixed inset-0 bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950">
+      {/* Space Background Elements - Fixed position */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
         {/* Nebula clouds */}
         <div className="absolute top-0 left-0 w-full h-full">
           <div className="absolute top-20 left-20 w-96 h-96 bg-gradient-radial from-cyan-500/20 via-transparent to-transparent rounded-full blur-3xl animate-pulse"></div>
@@ -266,11 +429,15 @@ const RegistrationSystem = () => {
         </div>
       </div>
 
+      {/* Scrollable Content Container */}
+      <div className="absolute inset-0 overflow-y-auto overflow-x-hidden z-10">
+        <div className="min-h-full flex items-center justify-center p-2 sm:p-4">
+
       {/* Login Page */}
       {currentPage === 'login' && (
-        <div className="w-full h-full flex flex-col lg:flex-row items-center justify-between max-w-7xl mx-auto gap-4">
-          {/* Left side - Space content */}
-          <div className="flex-1 flex flex-col justify-center px-4 sm:px-8 lg:px-16">
+        <div className="w-full h-full flex flex-col lg:flex-row items-center justify-center lg:justify-between max-w-7xl mx-auto gap-4">
+          {/* Left side - Space content (hidden on mobile, visible on lg+) */}
+          <div className="hidden lg:flex flex-1 flex-col justify-center px-4 sm:px-8 lg:px-16">
             <div className="space-y-8">
               {/* Cosmic logo and title */}
               <div className="space-y-6">
@@ -328,14 +495,29 @@ const RegistrationSystem = () => {
           {/* Right side - Glass login card */}
           <div className="flex-1 flex justify-center lg:justify-end">
             <div className="w-full max-w-sm">
+              {/* Mobile-only compact branding */}
+              <div className="lg:hidden text-center mb-6">
+                <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-r from-cyan-500 to-blue-600 shadow-xl animate-pulse relative mb-3">
+                  <div className="absolute inset-0 rounded-full bg-gradient-to-r from-cyan-400/30 to-blue-500/30 blur-lg"></div>
+                  <span className="relative w-8 h-8 flex items-center justify-center">
+                    <Laptop className="w-8 h-8 text-black/80 absolute left-0 top-0 z-10" />
+                    <User className="w-5 h-5 text-cyan-300 absolute left-1.5 top-2.5 z-20" />
+                  </span>
+                </div>
+                <h1 className="text-3xl font-bold bg-gradient-to-r from-cyan-400 via-blue-400 to-cyan-500 bg-clip-text text-transparent">
+                  ZAINLEE
+                </h1>
+                <p className="text-sm text-cyan-300/80 mt-1">IT Management System</p>
+              </div>
+
               {/* Cosmic glass morphism login card */}
               <div className="backdrop-blur-3xl bg-black/40 p-8 rounded-3xl shadow-2xl relative overflow-hidden">
                 {/* Optional: faint gradient overlay for depth */}
                 <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-cyan-400/10 via-transparent to-blue-500/10 pointer-events-none"></div>
                 <div className="relative z-10">
-                  <div className="text-center mb-8">
-                    <h2 className="text-2xl font-bold text-white mb-2">Welcome Back</h2>
-                    <p className="text-cyan-300">Sign in to your account</p>
+                  <div className="text-center mb-6 lg:mb-8">
+                    <h2 className="text-xl lg:text-2xl font-bold text-white mb-1 lg:mb-2">Welcome Back</h2>
+                    <p className="text-cyan-300 text-sm lg:text-base">Sign in to your account</p>
                   </div>
 
                   <div className="flex bg-slate-800/40 backdrop-blur-sm rounded-xl p-1 mb-6 border border-cyan-500/20">
@@ -363,8 +545,25 @@ const RegistrationSystem = () => {
                     </button>
                   </div>
 
+                  {/* Session invalidation message (shown when admin is demoted) */}
+                  {sessionMessage && (
+                    <div className="bg-orange-500/20 backdrop-blur-sm border border-orange-500/30 text-orange-300 px-4 py-3 rounded-xl text-sm mb-6 relative">
+                      <button
+                        onClick={clearSessionMessage}
+                        className="absolute top-2 right-2 text-orange-300 hover:text-orange-100 transition-colors"
+                      >
+                        ×
+                      </button>
+                      <p className="font-medium flex items-center">
+                        <Shield className="w-4 h-4 mr-2" />
+                        Session Ended
+                      </p>
+                      <p className="text-xs mt-1">{sessionMessage}</p>
+                    </div>
+                  )}
+
                   {loginType === 'employee' && (
-                    <div className="space-y-6">
+                    <form className="space-y-6" onSubmit={(e) => { e.preventDefault(); handleEmployeeLogin(); }}>
                       <div>
                         <label className="block text-sm font-medium text-cyan-300 mb-2">Employee Email</label>
                         <div className="relative">
@@ -375,6 +574,7 @@ const RegistrationSystem = () => {
                             onChange={handleEmployeeEmailChange}
                             className="w-full bg-slate-800/40 backdrop-blur-sm border border-cyan-500/30 rounded-xl pl-12 pr-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all duration-300"
                             placeholder="Enter your employee email"
+                            autoComplete="email"
                             required
                           />
                         </div>
@@ -390,6 +590,7 @@ const RegistrationSystem = () => {
                             onChange={handleEmployeePasswordChange}
                             className="w-full bg-slate-800/40 backdrop-blur-sm border border-cyan-500/30 rounded-xl pl-12 pr-12 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all duration-300"
                             placeholder="Enter your password"
+                            autoComplete="current-password"
                             required
                           />
                           <button
@@ -412,12 +613,24 @@ const RegistrationSystem = () => {
 
                       {error && (
                         <div className="bg-red-500/20 backdrop-blur-sm border border-red-500/30 text-red-300 px-4 py-3 rounded-xl text-sm">
-                          {error}
+                          <p>{error}</p>
+                          {error.includes('Email not verified') && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setVerificationEmail(employeeEmail);
+                                setCurrentPage('verification');
+                              }}
+                              className="mt-2 text-cyan-400 hover:text-cyan-300 underline text-sm font-medium"
+                            >
+                              Click here to verify your email
+                            </button>
+                          )}
                         </div>
                       )}
 
                       <button
-                        onClick={handleEmployeeLogin}
+                        type="submit"
                         disabled={isLoading || !employeeEmail || !employeePassword}
                         className="w-full bg-gradient-to-r from-cyan-500/80 to-blue-600/80 hover:from-cyan-600/90 hover:to-blue-700/90 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105 active:scale-95 backdrop-blur-sm shadow-lg border border-cyan-400/30"
                       >
@@ -434,19 +647,32 @@ const RegistrationSystem = () => {
                         )}
                       </button>
 
-                      <div className="text-center">
+                      <div className="text-center space-y-2">
                         <button
-                          onClick={() => setCurrentPage('register')}
-                          className="text-cyan-400 hover:text-cyan-300 text-sm font-medium transition-colors duration-200 hover:underline"
+                          type="button"
+                          onClick={() => {
+                            setForgotPasswordIdentifier(employeeEmail);
+                            setCurrentPage('forgotPassword');
+                          }}
+                          className="text-slate-400 hover:text-cyan-300 text-sm font-medium transition-colors duration-200 hover:underline"
                         >
-                          First time? Register here
+                          Forgot Password?
                         </button>
+                        <div>
+                          <button
+                            type="button"
+                            onClick={() => setCurrentPage('register')}
+                            className="text-cyan-400 hover:text-cyan-300 text-sm font-medium transition-colors duration-200 hover:underline"
+                          >
+                            First time? Register here
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                    </form>
                   )}
 
                   {loginType === 'admin' && (
-                    <div className="space-y-6">
+                    <form className="space-y-6" onSubmit={(e) => { e.preventDefault(); handleAdminLogin(); }}>
                       <div>
                         <label className="block text-sm font-medium text-cyan-300 mb-2">Username</label>
                         <div className="relative">
@@ -457,6 +683,7 @@ const RegistrationSystem = () => {
                             onChange={handleUsernameChange}
                             className="w-full bg-slate-800/40 backdrop-blur-sm border border-cyan-500/30 rounded-xl pl-12 pr-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all duration-300"
                             placeholder="Enter your username"
+                            autoComplete="username"
                             required
                           />
                         </div>
@@ -472,6 +699,7 @@ const RegistrationSystem = () => {
                             onChange={handlePasswordChange}
                             className="w-full bg-slate-800/40 backdrop-blur-sm border border-cyan-500/30 rounded-xl pl-12 pr-12 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all duration-300"
                             placeholder="Enter your password"
+                            autoComplete="current-password"
                             required
                           />
                           <button
@@ -486,12 +714,24 @@ const RegistrationSystem = () => {
 
                       {error && (
                         <div className="bg-red-500/20 backdrop-blur-sm border border-red-500/30 text-red-300 px-4 py-3 rounded-xl text-sm">
-                          {error}
+                          <p>{error}</p>
+                          {error.includes('Email not verified') && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setVerificationEmail(username);
+                                setCurrentPage('verification');
+                              }}
+                              className="mt-2 text-cyan-400 hover:text-cyan-300 underline text-sm font-medium"
+                            >
+                              Click here to verify your email
+                            </button>
+                          )}
                         </div>
                       )}
 
                       <button
-                        onClick={handleAdminLogin}
+                        type="submit"
                         disabled={isLoading || !username || !password}
                         className="w-full bg-gradient-to-r from-cyan-500/80 to-blue-600/80 hover:from-cyan-600/90 hover:to-blue-700/90 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105 active:scale-95 backdrop-blur-sm shadow-lg border border-cyan-400/30"
                       >
@@ -507,7 +747,20 @@ const RegistrationSystem = () => {
                           </>
                         )}
                       </button>
-                    </div>
+
+                      <div className="text-center">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setForgotPasswordIdentifier(username);
+                            setCurrentPage('forgotPassword');
+                          }}
+                          className="text-slate-400 hover:text-cyan-300 text-sm font-medium transition-colors duration-200 hover:underline"
+                        >
+                          Forgot Password?
+                        </button>
+                      </div>
+                    </form>
                   )}
                 </div>
               </div>
@@ -524,7 +777,7 @@ const RegistrationSystem = () => {
 
       {/* Registration Page */}
       {currentPage === 'register' && (
-        <div className="w-full max-w-md">
+        <div className="w-full max-w-md py-8">
           <div className="text-center mb-8">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 mb-4">
               <Users className="w-8 h-8 text-white" />
@@ -613,6 +866,7 @@ const RegistrationSystem = () => {
                       onChange={(e) => handleRegFormChange('password', e.target.value)}
                       className="w-full bg-slate-800/40 backdrop-blur-sm border border-cyan-500/30 rounded-xl px-12 py-3 pr-12 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all duration-300"
                       placeholder="Create a strong password"
+                      autoComplete="new-password"
                       required
                     />
                     <button
@@ -634,6 +888,7 @@ const RegistrationSystem = () => {
                       onChange={(e) => handleRegFormChange('confirmPassword', e.target.value)}
                       className="w-full bg-slate-800/40 backdrop-blur-sm border border-cyan-500/30 rounded-xl px-12 py-3 pr-12 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all duration-300"
                       placeholder="Confirm your password"
+                      autoComplete="new-password"
                       required
                     />
                     <button
@@ -675,7 +930,7 @@ const RegistrationSystem = () => {
 
       {/* Email Verification Page */}
       {currentPage === 'verification' && (
-        <div className="w-full max-w-md">
+        <div className="w-full max-w-md py-8">
           <div className="text-center mb-8">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 mb-4">
               <Mail className="w-8 h-8 text-white" />
@@ -811,7 +1066,7 @@ const RegistrationSystem = () => {
 
       {/* Success Page */}
       {currentPage === 'success' && (
-        <div className="w-full max-w-md">
+        <div className="w-full max-w-md py-8">
           <div className="text-center mb-8">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 mb-4">
               <CheckCircle className="w-8 h-8 text-white" />
@@ -857,8 +1112,365 @@ const RegistrationSystem = () => {
         </div>
       )}
 
+      {/* Forgot Password Page - Step 1: Enter Email/Username */}
+      {currentPage === 'forgotPassword' && (
+        <div className="w-full max-w-md py-8">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-r from-orange-500 to-red-600 mb-4">
+              <KeyRound className="w-8 h-8 text-white" />
+            </div>
+            <h1 className="text-3xl font-bold text-white mb-2">Forgot Password?</h1>
+            <p className="text-cyan-300">Enter your email or username to reset</p>
+          </div>
+
+          <div className="backdrop-blur-3xl bg-black/40 p-8 rounded-3xl shadow-2xl relative overflow-hidden">
+            <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-orange-400/10 via-transparent to-red-500/10 pointer-events-none"></div>
+            <div className="relative z-10">
+              <div className="flex items-center mb-6">
+                <button
+                  onClick={() => {
+                    setForgotPasswordError('');
+                    setForgotPasswordSuccess('');
+                    setCurrentPage('login');
+                  }}
+                  className="flex items-center text-cyan-400 hover:text-cyan-300 transition-colors"
+                >
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Back to Login
+                </button>
+              </div>
+
+              <form onSubmit={handleForgotPassword} className="space-y-6">
+                <div>
+                  <label className="block text-sm font-medium text-cyan-300 mb-2">Email or Username</label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-cyan-400 w-5 h-5" />
+                    <input
+                      type="text"
+                      value={forgotPasswordIdentifier}
+                      onChange={(e) => setForgotPasswordIdentifier(e.target.value)}
+                      className="w-full bg-slate-800/40 backdrop-blur-sm border border-cyan-500/30 rounded-xl pl-12 pr-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all duration-300"
+                      placeholder="Enter your email or username"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="bg-blue-500/20 backdrop-blur-sm border border-blue-500/30 text-blue-300 px-4 py-3 rounded-xl text-sm">
+                  <p className="font-medium flex items-center">
+                    <Mail className="w-4 h-4 mr-2" />
+                    Password Reset Instructions
+                  </p>
+                  <p className="text-xs mt-1">We'll send a 6-digit verification code to your registered email address.</p>
+                </div>
+
+                {forgotPasswordError && (
+                  <div className="bg-red-500/20 backdrop-blur-sm border border-red-500/30 text-red-300 px-4 py-3 rounded-xl text-sm">
+                    {forgotPasswordError}
+                  </div>
+                )}
+
+                {forgotPasswordSuccess && (
+                  <div className="bg-green-500/20 backdrop-blur-sm border border-green-500/30 text-green-300 px-4 py-3 rounded-xl text-sm">
+                    {forgotPasswordSuccess}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={forgotPasswordLoading || !forgotPasswordIdentifier}
+                  className="w-full bg-gradient-to-r from-orange-500/80 to-red-600/80 hover:from-orange-600/90 hover:to-red-700/90 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105 active:scale-95 backdrop-blur-sm shadow-lg border border-orange-400/30"
+                >
+                  {forgotPasswordLoading ? (
+                    <div className="flex items-center justify-center space-x-2">
+                      <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                      <span>Sending...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <Send className="inline w-5 h-5 mr-2" />
+                      Send Reset Code
+                    </>
+                  )}
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Code Verification Page - Step 2: Enter Code */}
+      {currentPage === 'resetCode' && (
+        <div className="w-full max-w-md py-8">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-r from-orange-500 to-red-600 mb-4">
+              <KeyRound className="w-8 h-8 text-white" />
+            </div>
+            <h1 className="text-3xl font-bold text-white mb-2">Enter Reset Code</h1>
+            <p className="text-cyan-300">Check your email for the verification code</p>
+          </div>
+
+          <div className="backdrop-blur-3xl bg-black/40 p-8 rounded-3xl shadow-2xl relative overflow-hidden">
+            <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-orange-400/10 via-transparent to-red-500/10 pointer-events-none"></div>
+            <div className="relative z-10">
+              <div className="text-center mb-6">
+                <p className="text-slate-300 mb-2">
+                  We've sent a verification code to:
+                </p>
+                <p className="text-cyan-400 font-semibold">{forgotPasswordEmail || forgotPasswordIdentifier}</p>
+              </div>
+
+              {resetTimerActive && (
+                <div className="flex items-center justify-center mb-4">
+                  <div className={`flex items-center justify-center px-4 py-2 rounded-xl ${
+                    resetTimeRemaining <= 60 ? 'bg-red-500/20 text-red-300' : 'bg-yellow-500/20 text-yellow-300'
+                  }`}>
+                    <Clock className="w-4 h-4 mr-2" />
+                    <span className="font-mono font-medium">
+                      Code expires in: {formatTime(resetTimeRemaining)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <form onSubmit={handleVerifyResetCode} className="space-y-6">
+                <div>
+                  <label className="block text-sm font-medium text-cyan-300 mb-2">Verification Code</label>
+                  <input
+                    type="text"
+                    value={resetCode}
+                    onChange={(e) => setResetCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    className="w-full bg-slate-800/40 backdrop-blur-sm border border-cyan-500/30 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all duration-300 text-center tracking-widest text-2xl font-mono"
+                    placeholder="000000"
+                    maxLength={6}
+                    required
+                  />
+                </div>
+
+                {resetCodeError && (
+                  <div className="bg-red-500/20 backdrop-blur-sm border border-red-500/30 text-red-300 px-4 py-3 rounded-xl text-sm">
+                    {resetCodeError}
+                  </div>
+                )}
+
+                {forgotPasswordSuccess && (
+                  <div className="bg-green-500/20 backdrop-blur-sm border border-green-500/30 text-green-300 px-4 py-3 rounded-xl text-sm">
+                    {forgotPasswordSuccess}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={resetCodeLoading || resetCode.length !== 6 || !resetTimerActive}
+                  className="w-full bg-gradient-to-r from-orange-500/80 to-red-600/80 hover:from-orange-600/90 hover:to-red-700/90 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105 active:scale-95 backdrop-blur-sm shadow-lg border border-orange-400/30"
+                >
+                  {resetCodeLoading ? (
+                    <div className="flex items-center justify-center space-x-2">
+                      <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                      <span>Verifying...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <CheckCircle className="inline w-5 h-5 mr-2" />
+                      Verify Code
+                    </>
+                  )}
+                </button>
+              </form>
+
+              <div className="text-center mt-6 space-y-3">
+                <button
+                  onClick={() => {
+                    setResetCodeError('');
+                    setForgotPasswordSuccess('');
+                    setCurrentPage('forgotPassword');
+                  }}
+                  className="flex items-center justify-center mx-auto text-cyan-400 hover:text-cyan-300 text-sm font-medium transition-colors duration-200 hover:underline"
+                >
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Change Email/Username
+                </button>
+                
+                <p className="text-slate-400 text-sm">Didn't receive the code?</p>
+                <button
+                  onClick={handleResendResetCode}
+                  disabled={forgotPasswordLoading}
+                  className="text-cyan-400 hover:text-cyan-300 text-sm font-medium transition-colors duration-200 hover:underline disabled:opacity-50"
+                >
+                  {forgotPasswordLoading ? (
+                    <span className="flex items-center justify-center">
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-cyan-400 border-t-transparent mr-2"></div>
+                      Sending...
+                    </span>
+                  ) : (
+                    <>
+                      <RefreshCw className="inline w-4 h-4 mr-1" />
+                      Resend Code
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Password Page - Step 3: Set New Password */}
+      {currentPage === 'newPassword' && (
+        <div className="w-full max-w-md py-8">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-r from-green-500 to-teal-600 mb-4">
+              <Lock className="w-8 h-8 text-white" />
+            </div>
+            <h1 className="text-3xl font-bold text-white mb-2">Set New Password</h1>
+            <p className="text-cyan-300">Create a strong password for your account</p>
+          </div>
+
+          <div className="backdrop-blur-3xl bg-black/40 p-8 rounded-3xl shadow-2xl relative overflow-hidden">
+            <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-green-400/10 via-transparent to-teal-500/10 pointer-events-none"></div>
+            <div className="relative z-10">
+              <form onSubmit={handleResetPassword} className="space-y-6">
+                <div>
+                  <label className="block text-sm font-medium text-cyan-300 mb-2">New Password</label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-cyan-400 w-5 h-5" />
+                    <input
+                      type={showNewPassword ? 'text' : 'password'}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="w-full bg-slate-800/40 backdrop-blur-sm border border-cyan-500/30 rounded-xl pl-12 pr-12 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all duration-300"
+                      placeholder="Enter new password"
+                      autoComplete="new-password"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-cyan-400 hover:text-cyan-300 transition-colors"
+                    >
+                      {showNewPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-cyan-300 mb-2">Confirm New Password</label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-cyan-400 w-5 h-5" />
+                    <input
+                      type={showConfirmNewPassword ? 'text' : 'password'}
+                      value={confirmNewPassword}
+                      onChange={(e) => setConfirmNewPassword(e.target.value)}
+                      className="w-full bg-slate-800/40 backdrop-blur-sm border border-cyan-500/30 rounded-xl pl-12 pr-12 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all duration-300"
+                      placeholder="Confirm new password"
+                      autoComplete="new-password"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmNewPassword(!showConfirmNewPassword)}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-cyan-400 hover:text-cyan-300 transition-colors"
+                    >
+                      {showConfirmNewPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Password requirements */}
+                <div className="bg-slate-800/40 backdrop-blur-sm border border-cyan-500/20 rounded-xl p-4">
+                  <p className="text-cyan-300 text-sm font-medium mb-2">Password Requirements:</p>
+                  <ul className="text-xs space-y-1">
+                    <li className={`flex items-center ${newPassword.length >= 8 ? 'text-green-400' : 'text-slate-400'}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full mr-2 ${newPassword.length >= 8 ? 'bg-green-400' : 'bg-slate-500'}`}></span>
+                      At least 8 characters
+                    </li>
+                    <li className={`flex items-center ${/[A-Z]/.test(newPassword) ? 'text-green-400' : 'text-slate-400'}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full mr-2 ${/[A-Z]/.test(newPassword) ? 'bg-green-400' : 'bg-slate-500'}`}></span>
+                      One uppercase letter
+                    </li>
+                    <li className={`flex items-center ${/[a-z]/.test(newPassword) ? 'text-green-400' : 'text-slate-400'}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full mr-2 ${/[a-z]/.test(newPassword) ? 'bg-green-400' : 'bg-slate-500'}`}></span>
+                      One lowercase letter
+                    </li>
+                    <li className={`flex items-center ${/[0-9]/.test(newPassword) ? 'text-green-400' : 'text-slate-400'}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full mr-2 ${/[0-9]/.test(newPassword) ? 'bg-green-400' : 'bg-slate-500'}`}></span>
+                      One number
+                    </li>
+                    <li className={`flex items-center ${newPassword && confirmNewPassword && newPassword === confirmNewPassword ? 'text-green-400' : 'text-slate-400'}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full mr-2 ${newPassword && confirmNewPassword && newPassword === confirmNewPassword ? 'bg-green-400' : 'bg-slate-500'}`}></span>
+                      Passwords match
+                    </li>
+                  </ul>
+                </div>
+
+                {resetPasswordError && (
+                  <div className="bg-red-500/20 backdrop-blur-sm border border-red-500/30 text-red-300 px-4 py-3 rounded-xl text-sm">
+                    {resetPasswordError}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={resetPasswordLoading || !newPassword || !confirmNewPassword}
+                  className="w-full bg-gradient-to-r from-green-500/80 to-teal-600/80 hover:from-green-600/90 hover:to-teal-700/90 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105 active:scale-95 backdrop-blur-sm shadow-lg border border-green-400/30"
+                >
+                  {resetPasswordLoading ? (
+                    <div className="flex items-center justify-center space-x-2">
+                      <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                      <span>Resetting Password...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <KeyRound className="inline w-5 h-5 mr-2" />
+                      Reset Password
+                    </>
+                  )}
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Password Reset Success Page */}
+      {currentPage === 'resetSuccess' && (
+        <div className="w-full max-w-md py-8">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-r from-green-500 to-teal-600 mb-4">
+              <CheckCircle className="w-8 h-8 text-white" />
+            </div>
+            <h1 className="text-3xl font-bold text-white mb-2">Password Reset!</h1>
+            <p className="text-cyan-300">Your password has been successfully changed</p>
+          </div>
+
+          <div className="backdrop-blur-3xl bg-black/40 p-8 rounded-3xl shadow-2xl relative overflow-hidden text-center">
+            <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-green-400/10 via-transparent to-teal-500/10 pointer-events-none"></div>
+            <div className="relative z-10">
+              <div className="bg-green-500/20 backdrop-blur-sm border border-green-500/30 text-green-300 px-4 py-3 rounded-xl mb-6">
+                <p className="font-medium flex items-center justify-center">
+                  <CheckCircle className="w-5 h-5 mr-2" />
+                  Password Changed Successfully!
+                </p>
+                <p className="text-sm mt-2">You can now log in with your new password. All existing sessions have been logged out for security.</p>
+              </div>
+
+              <button
+                onClick={() => setCurrentPage('login')}
+                className="w-full bg-gradient-to-r from-cyan-500/80 to-blue-600/80 hover:from-cyan-600/90 hover:to-blue-700/90 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-300 transform hover:scale-105 active:scale-95 backdrop-blur-sm shadow-lg border border-cyan-400/30"
+              >
+                <Lock className="inline w-5 h-5 mr-2" />
+                Continue to Login
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+        </div>
+      </div>
+
       {/* Custom CSS for animations */}
-      <style jsx>{`
+      <style>{`
         @keyframes typing {
           from { width: 0; }
           to { width: 100%; }

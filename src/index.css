@@ -7,9 +7,60 @@
     @apply border-slate-600;
   }
   
+  html {
+    background-color: #0f172a;
+    color-scheme: dark;
+    /* Theme-based scrollbars (track + thumb) */
+    scrollbar-color: #475569 #0f172a;
+  }
+  
+  html::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  
+  html::-webkit-scrollbar-track {
+    background: #0f172a;
+  }
+  
+  html::-webkit-scrollbar-thumb {
+    background: #475569;
+    border-radius: 5px;
+    border: 2px solid #0f172a;
+  }
+  
+  html::-webkit-scrollbar-thumb:hover {
+    background: #64748b;
+  }
+  
   body {
     @apply bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-slate-100;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+    background-color: #0f172a;
+  }
+  
+  /* Theme-based scrollbars for all scrollable elements */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #475569 #1e293b;
+  }
+  
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  *::-webkit-scrollbar-track {
+    background: #1e293b;
+  }
+  
+  *::-webkit-scrollbar-thumb {
+    background: #475569;
+    border-radius: 4px;
+  }
+  
+  *::-webkit-scrollbar-thumb:hover {
+    background: #64748b;
   }
 }
 
@@ -79,6 +130,16 @@
     @apply bg-slate-900 text-white;
   }
   
+  /* Ensure select dropdowns don't show scrollbars */
+  select.input-field {
+    @apply appearance-none;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%23cbd5e1' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    background-position: right 0.5rem center;
+    background-repeat: no-repeat;
+    background-size: 1.5em 1.5em;
+    padding-right: 2.5rem;
+  }
+  
   .metric-card {
     @apply glass-morphism p-6 rounded-xl hover:bg-white/10 transition-all duration-300;
   }
@@ -139,14 +200,64 @@
 }
 
 @keyframes fadeDown {
-  from { 
-    opacity: 0; 
+  from {
+    opacity: 0;
     transform: translateY(-10px);
   }
-  to { 
-    opacity: 1; 
+  to {
+    opacity: 1;
     transform: translateY(0);
   }
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(40px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-left {
+  opacity: 0;
+  animation: slideInLeft 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-slide-in-right {
+  opacity: 0;
+  animation: slideInRight 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes accordionDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    max-height: 2000px;
+    transform: translateY(0);
+  }
+}
+
+.animate-accordion-down {
+  overflow: hidden;
+  animation: accordionDown 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 /* Animation classes */
@@ -255,4 +366,250 @@ input[type="date"]:-ms-input-placeholder {
 
 input[type="date"]::placeholder {
   color: #fff;
+}
+
+/* PWA & Mobile Optimizations */
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Safe area insets for notched devices (iPhone X+, etc.) */
+.safe-area-inset {
+  padding-top: env(safe-area-inset-top);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+}
+
+/* Touch-friendly tap targets */
+@media (pointer: coarse) {
+  button, 
+  [role="button"],
+  a,
+  select {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  .btn-primary,
+  .btn-secondary {
+    padding: 12px 24px;
+  }
+}
+
+/* Mobile-optimized checkboxes */
+@media (max-width: 768px) {
+  .checkbox-mobile {
+    width: 14px !important;
+    height: 14px !important;
+    min-width: 14px !important;
+    min-height: 14px !important;
+  }
+  
+  /* Table selection checkboxes - extra small on mobile */
+  .checkbox-table-select {
+    width: 16px !important;
+    height: 16px !important;
+    min-width: 16px !important;
+    min-height: 16px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .checkbox-mobile,
+  .checkbox-table-select {
+    width: 14px !important;
+    height: 14px !important;
+    min-width: 14px !important;
+    min-height: 14px !important;
+  }
+}
+
+/* Styled checkboxes - dark theme */
+.checkbox-table-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: #1e293b;
+  border: 1.5px solid #475569;
+  border-radius: 4px;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.15s ease;
+}
+
+.checkbox-table-select:checked {
+  background-color: #06b6d4;
+  border-color: #06b6d4;
+}
+
+.checkbox-table-select:checked::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -60%) rotate(45deg);
+  width: 4px;
+  height: 7px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+}
+
+.checkbox-table-select:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.3);
+}
+
+.checkbox-table-select:hover:not(:checked) {
+  border-color: #64748b;
+  background-color: #334155;
+}
+
+/* Prevent horizontal scroll on mobile */
+html, body {
+  overflow-x: hidden;
+  max-width: 100vw;
+  background-color: #0f172a;
+}
+
+/* Ensure html always has dark background (prevents white flash on rotation) */
+html {
+  background: #0f172a;
+}
+
+/* Better focus states for accessibility */
+:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* Disable pull-to-refresh on PWA */
+body.pwa-mode {
+  overscroll-behavior: none;
+}
+
+/* Mobile-first responsive typography */
+@media (max-width: 640px) {
+  html {
+    font-size: 14px;
+  }
+  
+  h1 {
+    font-size: 1.75rem;
+  }
+  
+  h2 {
+    font-size: 1.5rem;
+  }
+  
+  h3 {
+    font-size: 1.25rem;
+  }
+}
+
+/* Tablet adjustments */
+@media (min-width: 641px) and (max-width: 1024px) {
+  html {
+    font-size: 15px;
+  }
+}
+
+/* Landscape mode on mobile */
+@media (max-height: 500px) and (orientation: landscape) {
+  .glass-morphism {
+    padding: 12px;
+  }
+  
+  .metric-card {
+    padding: 12px;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .glass-morphism {
+    border-color: rgba(255, 255, 255, 0.5);
+  }
+  
+  .btn-primary {
+    border: 2px solid white;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Standalone PWA mode adjustments */
+@media (display-mode: standalone) {
+  body {
+    padding-top: env(safe-area-inset-top);
+  }
+  
+  /* Adjust header for notch */
+  header,
+  nav {
+    padding-top: env(safe-area-inset-top);
+  }
+}
+
+/* Bottom navigation safe area for mobile PWA */
+.bottom-nav {
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+}
+
+/* Responsive table scrolling */
+.table-responsive {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+/* Hide scrollbar but keep functionality */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari and Opera */
+}
+
+/* Hide scrollbar on main content area globally */
+main {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+main::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari and Opera */
+}
+
+/* iOS specific fixes */
+@supports (-webkit-touch-callout: none) {
+  body {
+    /* Fix for iOS vh units */
+    min-height: -webkit-fill-available;
+  }
+  
+  /* Fix for iOS input zoom */
+  input, select, textarea {
+    font-size: 16px;
+  }
 }

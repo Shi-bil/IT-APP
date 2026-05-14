@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Ticket, Plus, Search, Filter, MoreHorizontal, Edit, Eye, MessageSquare, Clock, User, AlertTriangle, X, Check, ChevronDown, Trash2, ArrowDownUp } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { Ticket, Plus, Search, Filter, MoreHorizontal, Edit, Eye, MessageSquare, Clock, User, AlertTriangle, X, Check, Trash2, ArrowDownUp, CheckCircle, Timer } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useTickets } from '../contexts/TicketContext';
 import ticketService from '../services/ticketService';
 
 const TicketsPage = () => {
   const { user } = useAuth();
+  const { refreshTicketCount } = useTickets();
+  const [searchParams] = useSearchParams();
   const isAdmin = user?.role === 'admin';
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
   const [selectedPriority, setSelectedPriority] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -38,9 +42,6 @@ const TicketsPage = () => {
     dueDate: ''
   });
 
-  // Add state for status dropdown
-  const [statusDropdownOpen, setStatusDropdownOpen] = useState({});
-  const dropdownRef = useRef({});
 
   // Add state for delete confirmation modal
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -61,31 +62,44 @@ const TicketsPage = () => {
     fetchStats();
   }, [isAdmin]);
 
-  // Fetch tickets based on user role
+  // Update search query from URL params
+  useEffect(() => {
+    const urlSearch = searchParams.get('search');
+    if (urlSearch) {
+      setSearchQuery(urlSearch);
+    }
+  }, [searchParams]);
+
+  // Fetch tickets based on user role — paint instantly from cache when available.
   const fetchTickets = async () => {
     try {
-      setLoading(true);
       setError(null);
-      
-      let result;
-      if (isAdmin) {
-        result = await ticketService.getAllTickets();
+
+      const cached = isAdmin
+        ? ticketService.peekAllTickets()
+        : ticketService.peekUserTickets();
+      if (cached?.success && Array.isArray(cached.tickets)) {
+        setTickets(cached.tickets);
+        setLoading(false);
       } else {
-        result = await ticketService.getUserTickets();
+        setLoading(true);
       }
-      
+
+      const result = isAdmin
+        ? await ticketService.getAllTickets()
+        : await ticketService.getUserTickets();
+
       if (result.success) {
-        console.log("Tickets data in component:", result.tickets);
-        if (result.tickets.length > 0) {
-          console.log("First ticket createdBy:", result.tickets[0].createdBy);
-        }
-        setTickets(result.tickets);
-      } else {
-        setError(result.error);
+        setTickets(result.tickets || []);
+      } else if (!cached) {
+        console.error("Failed to fetch tickets:", result.error);
+        setError(result.error || 'Failed to fetch tickets');
+        setTickets([]);
       }
     } catch (err) {
-      setError('Failed to fetch tickets');
       console.error('Fetch tickets error:', err);
+      setError('Failed to fetch tickets');
+      setTickets([]);
     } finally {
       setLoading(false);
     }
@@ -96,7 +110,15 @@ const TicketsPage = () => {
     try {
       const result = await ticketService.getTicketStats();
       if (result.success) {
-        setStats(result.stats);
+        setStats(result.stats || {
+          openCount: 0,
+          inProgressCount: 0,
+          resolvedCount: 0,
+          resolvedToday: 0,
+          avgResolutionTime: 0
+        });
+      } else {
+        console.error('Failed to fetch stats:', result.error);
       }
     } catch (err) {
       console.error('Fetch stats error:', err);
@@ -142,6 +164,7 @@ const TicketsPage = () => {
         // Refresh tickets and stats
         fetchTickets();
         fetchStats();
+        refreshTicketCount(); // Update sidebar badge immediately
       } else {
         alert('Failed to create ticket: ' + result.error);
       }
@@ -161,10 +184,13 @@ const TicketsPage = () => {
       // Fetch comments for this ticket
       const result = await ticketService.getTicketComments(ticket.id);
       if (result.success) {
-        setTicketComments(result.comments);
+        setTicketComments(result.comments || []);
+      } else {
+        setTicketComments([]);
       }
     } catch (err) {
       console.error('Fetch comments error:', err);
+      setTicketComments([]);
     }
   };
   
@@ -193,11 +219,14 @@ const TicketsPage = () => {
     ticketService.getTicketComments(ticket.id)
       .then(result => {
         if (result.success) {
-          setTicketComments(result.comments);
+          setTicketComments(result.comments || []);
+        } else {
+          setTicketComments([]);
         }
       })
       .catch(err => {
         console.error('Fetch comments error:', err);
+        setTicketComments([]);
       })
       .finally(() => setCommentLoading(false));
   };
@@ -215,7 +244,9 @@ const TicketsPage = () => {
         setCommentLoading(true);
         const commentsResult = await ticketService.getTicketComments(selectedTicket.id);
         if (commentsResult.success) {
-          setTicketComments(commentsResult.comments);
+          setTicketComments(commentsResult.comments || []);
+        } else {
+          setTicketComments([]);
         }
         setCommentLoading(false);
       }
@@ -249,6 +280,7 @@ const TicketsPage = () => {
         // Refresh tickets and stats
         fetchTickets();
         fetchStats();
+        refreshTicketCount(); // Update sidebar badge immediately
       } else {
         alert('Failed to update ticket: ' + result.error);
       }
@@ -273,15 +305,10 @@ const TicketsPage = () => {
       const result = await ticketService.updateTicket(ticketId, { status: newStatus });
       
       if (result.success) {
-        // Close dropdown
-        setStatusDropdownOpen(prev => ({
-          ...prev,
-          [ticketId]: false
-        }));
-        
         // Refresh tickets and stats
         fetchTickets();
         fetchStats();
+        refreshTicketCount(); // Update sidebar badge immediately
       } else {
         alert('Failed to update ticket status: ' + result.error);
       }
@@ -291,33 +318,16 @@ const TicketsPage = () => {
     }
   };
   
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      Object.keys(statusDropdownOpen).forEach(ticketId => {
-        if (statusDropdownOpen[ticketId] && 
-            dropdownRef.current[ticketId] && 
-            !dropdownRef.current[ticketId].contains(event.target)) {
-          setStatusDropdownOpen(prev => ({
-            ...prev,
-            [ticketId]: false
-          }));
-        }
-      });
+  // Cycle through statuses: open -> in-progress -> resolved -> open
+  const handleStatusCycle = async (ticketId, currentStatus) => {
+    const statusCycle = {
+      'open': 'in-progress',
+      'in-progress': 'resolved',
+      'resolved': 'open'
     };
     
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [statusDropdownOpen]);
-  
-  // Toggle status dropdown
-  const toggleStatusDropdown = (ticketId) => {
-    setStatusDropdownOpen(prev => ({
-      ...prev,
-      [ticketId]: !prev[ticketId]
-    }));
+    const nextStatus = statusCycle[currentStatus] || 'open';
+    await handleStatusChange(ticketId, nextStatus);
   };
 
   // Show delete confirmation modal
@@ -334,6 +344,7 @@ const TicketsPage = () => {
       if (result.success) {
         fetchTickets();
         fetchStats();
+        refreshTicketCount(); // Update sidebar badge immediately
       } else {
         alert('Failed to delete ticket: ' + result.error);
       }
@@ -414,11 +425,31 @@ const TicketsPage = () => {
     }
   };
 
+  // Highlight search match with transparent yellow
+  const highlightSearch = (text, search) => {
+    if (!text || typeof text !== 'string') return text;
+    const q = search && search.trim();
+    if (!q) return text;
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(${escaped})`, 'gi');
+    const parts = String(text).split(regex);
+    if (parts.length === 1) return text;
+    return parts.map((part, i) =>
+      i % 2 === 1 ? (
+        <span key={i} className="bg-yellow-400/25 rounded px-0.5">{part}</span>
+      ) : (
+        part
+      )
+    );
+  };
+
   // Filter tickets based on search and filters
-  const filteredTickets = tickets.filter(ticket => {
-    const matchesSearch = ticket.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         ticket.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         ticket.category.toLowerCase().includes(searchQuery.toLowerCase());
+  const filteredTickets = (tickets || []).filter(ticket => {
+    const q = searchQuery.trim().toLowerCase();
+    const matchesSearch = !q ||
+      ticket.title?.toLowerCase().includes(q) ||
+      ticket.description?.toLowerCase().includes(q) ||
+      ticket.category?.toLowerCase().includes(q);
     const matchesPriority = selectedPriority === 'all' || ticket.priority === selectedPriority;
     const matchesStatus = selectedStatus === 'all' || ticket.status === selectedStatus;
     
@@ -459,24 +490,22 @@ const TicketsPage = () => {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4 animate-fade-in">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600 mb-1 sm:mb-2">Support Tickets</h1>
-          <p className="text-slate-400 text-sm sm:text-base">
-            {isAdmin 
-              ? 'Track and manage all IT support requests' 
-              : 'Track and submit your support tickets'}
+      <div className="flex flex-row items-center justify-between gap-2 sm:gap-4 animate-fade-in">
+        <div className="flex-shrink-0 min-w-0">
+          <h1 className="text-xl sm:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600 mb-0.5 sm:mb-2 truncate">Tickets</h1>
+          <p className="text-slate-400 text-xs sm:text-base truncate">
+            {isAdmin ? 'Manage support requests' : 'Your support tickets'}
           </p>
         </div>
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
+        <div className="flex flex-row items-center gap-2 sm:gap-3 flex-shrink-0">
           {isAdmin && (
             <div className="relative z-[10000]" ref={sortDropdownRef}>
               <button 
-                className="btn-secondary flex items-center gap-2 backdrop-blur-sm hover:scale-105 transition-all"
+                className="btn-secondary flex items-center gap-1.5 sm:gap-2 backdrop-blur-sm hover:scale-105 transition-all text-xs sm:text-sm px-2.5 sm:px-4 py-2"
                 onClick={() => setShowSortDropdown((v) => !v)}
               >
-                <ArrowDownUp className="w-4 h-4" />
-                Sort
+                <ArrowDownUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <span className="hidden xs:inline">Sort</span>
               </button>
               {showSortDropdown && (
                 <div className="absolute right-0 mt-2 w-48 glass-morphism rounded-lg shadow-glow z-[10001] animate-fade-down">
@@ -500,76 +529,147 @@ const TicketsPage = () => {
             </div>
           )}
           <button 
-            className="btn-primary bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 hover:scale-105 transition-all duration-300 flex items-center gap-2"
+            className="btn-primary bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 hover:scale-105 transition-all duration-300 flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm px-2.5 sm:px-4 py-2 whitespace-nowrap"
             onClick={() => setShowCreateModal(true)}
           >
-            <Plus className="w-4 h-4" />
-            New Ticket
+            <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="hidden xs:inline">New Ticket</span><span className="xs:hidden">New</span>
           </button>
         </div>
       </div>
 
-      {/* Statistics Cards - Only visible to admins */}
+      {/* Statistics Cards - Compact horizontal layout - Admin view - Click to filter */}
       {isAdmin && (
-        <div className="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-6 animate-fade-up">
-          <div className="glass-morphism p-6 rounded-xl border border-slate-700/30 shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02]">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-slate-400">Open Tickets</h3>
-              <Ticket className="w-5 h-5 text-orange-400" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4 animate-fade-up">
+          {/* Open Tickets Card */}
+          <div 
+            onClick={() => setSelectedStatus(selectedStatus === 'open' ? 'all' : 'open')}
+            className={`glass-morphism rounded-lg sm:rounded-xl border shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02] p-2 sm:p-4 flex flex-row items-center active:scale-95 cursor-pointer group ${
+              selectedStatus === 'open' 
+                ? 'border-orange-500/60 ring-2 ring-orange-500/30 bg-orange-500/10' 
+                : 'border-orange-500/20'
+            }`}
+          >
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center bg-gradient-to-r from-orange-500 to-red-600 shadow-lg flex-shrink-0">
+              <Ticket className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
             </div>
-            <p className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-yellow-600">{stats.openCount}</p>
-            <p className="text-sm text-orange-400 mt-1">Needs attention</p>
+            <div className="flex flex-col items-end flex-1 ml-2 sm:ml-3">
+              <span className="text-lg sm:text-xl font-bold text-white">{stats.openCount}</span>
+              <span className="text-[9px] sm:text-xs text-orange-200/80 uppercase font-medium">OPEN</span>
+            </div>
           </div>
-          <div className="glass-morphism p-6 rounded-xl border border-slate-700/30 shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02]">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-slate-400">In Progress</h3>
-              <Clock className="w-5 h-5 text-yellow-400" />
+
+          {/* In Progress Card */}
+          <div 
+            onClick={() => setSelectedStatus(selectedStatus === 'in-progress' ? 'all' : 'in-progress')}
+            className={`glass-morphism rounded-lg sm:rounded-xl border shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02] p-2 sm:p-4 flex flex-row items-center active:scale-95 cursor-pointer group ${
+              selectedStatus === 'in-progress' 
+                ? 'border-yellow-500/60 ring-2 ring-yellow-500/30 bg-yellow-500/10' 
+                : 'border-yellow-500/20'
+            }`}
+          >
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center bg-gradient-to-r from-yellow-500 to-amber-600 shadow-lg flex-shrink-0">
+              <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
             </div>
-            <p className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-amber-600">{stats.inProgressCount}</p>
-            <p className="text-sm text-slate-400 mt-1">Being worked on</p>
+            <div className="flex flex-col items-end flex-1 ml-2 sm:ml-3">
+              <span className="text-lg sm:text-xl font-bold text-white">{stats.inProgressCount}</span>
+              <span className="text-[9px] sm:text-xs text-yellow-200/80 uppercase font-medium">PROGRESS</span>
+            </div>
           </div>
-          <div className="glass-morphism p-6 rounded-xl border border-slate-700/30 shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02]">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-slate-400">Resolved Today</h3>
-              <div className="w-2 h-2 bg-green-400 rounded-full shadow-glow-green"></div>
+
+          {/* Resolved Today Card */}
+          <div 
+            onClick={() => setSelectedStatus(selectedStatus === 'resolved' ? 'all' : 'resolved')}
+            className={`glass-morphism rounded-lg sm:rounded-xl border shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02] p-2 sm:p-4 flex flex-row items-center active:scale-95 cursor-pointer group ${
+              selectedStatus === 'resolved' 
+                ? 'border-green-500/60 ring-2 ring-green-500/30 bg-green-500/10' 
+                : 'border-green-500/20'
+            }`}
+          >
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center bg-gradient-to-r from-green-500 to-emerald-600 shadow-lg flex-shrink-0">
+              <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
             </div>
-            <p className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-emerald-600">{stats.resolvedToday}</p>
-            <p className="text-sm text-green-400 mt-1">Recently completed</p>
+            <div className="flex flex-col items-end flex-1 ml-2 sm:ml-3">
+              <span className="text-lg sm:text-xl font-bold text-white">{stats.resolvedToday}</span>
+              <span className="text-[9px] sm:text-xs text-green-200/80 uppercase font-medium">DONE</span>
+            </div>
           </div>
-          <div className="glass-morphism p-6 rounded-xl border border-slate-700/30 shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02]">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-slate-400">Avg Resolution</h3>
-              <Clock className="w-5 h-5 text-cyan-400" />
+
+          {/* Avg Resolution Card - Shows all when clicked */}
+          <div 
+            onClick={() => setSelectedStatus('all')}
+            className={`glass-morphism rounded-lg sm:rounded-xl border shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02] p-2 sm:p-4 flex flex-row items-center active:scale-95 cursor-pointer group ${
+              selectedStatus === 'all' 
+                ? 'border-cyan-500/60 ring-2 ring-cyan-500/30 bg-cyan-500/10' 
+                : 'border-cyan-500/20'
+            }`}
+          >
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center bg-gradient-to-r from-cyan-500 to-blue-600 shadow-lg flex-shrink-0">
+              <Timer className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
             </div>
-            <p className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">{stats.avgResolutionTime}h</p>
-            <p className="text-sm text-green-400 mt-1">Average time to resolve</p>
+            <div className="flex flex-col items-end flex-1 ml-2 sm:ml-3">
+              <span className="text-lg sm:text-xl font-bold text-white">{stats.avgResolutionTime}h</span>
+              <span className="text-[9px] sm:text-xs text-cyan-200/80 uppercase font-medium">AVG</span>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Employee ticket stats */}
+      {/* Employee ticket stats - Compact horizontal layout - Click to filter */}
       {!isAdmin && (
-        <div className="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-6 animate-fade-up">
-          <div className="glass-morphism p-6 rounded-xl border border-slate-700/30 shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02]">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-slate-400">Your Open Tickets</h3>
-              <Ticket className="w-5 h-5 text-orange-400" />
+        <div className="grid grid-cols-3 gap-2 sm:gap-4 animate-fade-up">
+          {/* Your Open Tickets Card */}
+          <div 
+            onClick={() => setSelectedStatus(selectedStatus === 'open' ? 'all' : 'open')}
+            className={`glass-morphism rounded-lg sm:rounded-xl border shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02] p-2 sm:p-4 flex flex-row items-center active:scale-95 cursor-pointer group ${
+              selectedStatus === 'open' 
+                ? 'border-orange-500/60 ring-2 ring-orange-500/30 bg-orange-500/10' 
+                : 'border-orange-500/20'
+            }`}
+          >
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center bg-gradient-to-r from-orange-500 to-red-600 shadow-lg flex-shrink-0">
+              <Ticket className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
             </div>
-            <p className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-yellow-600">{stats.openCount}</p>
+            <div className="flex flex-col items-end flex-1 ml-2 sm:ml-3">
+              <span className="text-lg sm:text-xl font-bold text-white">{stats.openCount}</span>
+              <span className="text-[9px] sm:text-xs text-orange-200/80 uppercase font-medium">OPEN</span>
+            </div>
           </div>
-          <div className="glass-morphism p-6 rounded-xl border border-slate-700/30 shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02]">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-slate-400">In Progress</h3>
-              <Clock className="w-5 h-5 text-yellow-400" />
+
+          {/* In Progress Card */}
+          <div 
+            onClick={() => setSelectedStatus(selectedStatus === 'in-progress' ? 'all' : 'in-progress')}
+            className={`glass-morphism rounded-lg sm:rounded-xl border shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02] p-2 sm:p-4 flex flex-row items-center active:scale-95 cursor-pointer group ${
+              selectedStatus === 'in-progress' 
+                ? 'border-yellow-500/60 ring-2 ring-yellow-500/30 bg-yellow-500/10' 
+                : 'border-yellow-500/20'
+            }`}
+          >
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center bg-gradient-to-r from-yellow-500 to-amber-600 shadow-lg flex-shrink-0">
+              <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
             </div>
-            <p className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-amber-600">{stats.inProgressCount}</p>
+            <div className="flex flex-col items-end flex-1 ml-2 sm:ml-3">
+              <span className="text-lg sm:text-xl font-bold text-white">{stats.inProgressCount}</span>
+              <span className="text-[9px] sm:text-xs text-yellow-200/80 uppercase font-medium">PROGRESS</span>
+            </div>
           </div>
-          <div className="glass-morphism p-6 rounded-xl border border-slate-700/30 shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02]">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-slate-400">Resolved</h3>
-              <div className="w-2 h-2 bg-green-400 rounded-full shadow-glow-green"></div>
+
+          {/* Resolved Card */}
+          <div 
+            onClick={() => setSelectedStatus(selectedStatus === 'resolved' ? 'all' : 'resolved')}
+            className={`glass-morphism rounded-lg sm:rounded-xl border shadow-glow hover:shadow-glow-intense transition-all duration-300 hover:scale-[1.02] p-2 sm:p-4 flex flex-row items-center active:scale-95 cursor-pointer group ${
+              selectedStatus === 'resolved' 
+                ? 'border-green-500/60 ring-2 ring-green-500/30 bg-green-500/10' 
+                : 'border-green-500/20'
+            }`}
+          >
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center bg-gradient-to-r from-green-500 to-emerald-600 shadow-lg flex-shrink-0">
+              <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
             </div>
-            <p className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-emerald-600">{stats.resolvedCount}</p>
+            <div className="flex flex-col items-end flex-1 ml-2 sm:ml-3">
+              <span className="text-lg sm:text-xl font-bold text-white">{stats.resolvedCount}</span>
+              <span className="text-[9px] sm:text-xs text-green-200/80 uppercase font-medium">DONE</span>
+            </div>
           </div>
         </div>
       )}
@@ -698,6 +798,7 @@ const TicketsPage = () => {
               value={selectedStatus}
               onChange={(e) => setSelectedStatus(e.target.value)}
               className="input-field"
+              size="1"
             >
               <option value="all">All Status</option>
               <option value="open">Open</option>
@@ -761,8 +862,8 @@ const TicketsPage = () => {
                     <tr key={ticket.id} className="border-b border-white/5 hover:bg-white/5 animate-fade-up" style={getAnimationDelay(index)}>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div>
-                          <div className="text-sm font-medium text-white">{ticket.title}</div>
-                          <div className="text-sm text-slate-400">{ticket.category}</div>
+                          <div className="text-sm font-medium text-white">{highlightSearch(ticket.title, searchQuery)}</div>
+                          <div className="text-sm text-slate-400">{highlightSearch(ticket.category, searchQuery)}</div>
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -789,56 +890,46 @@ const TicketsPage = () => {
                       )}
                       <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
                         <div className="flex items-center justify-center space-x-2">
-                            {/* Status Change Dropdown - only for admins */}
+                            {/* Status Change Button - only for admins - cycles through statuses on click */}
                             {isAdmin && (
-                              <div className="relative" ref={el => dropdownRef.current[ticket.id] = el}>
-                                <button 
-                                  className="p-1 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors flex items-center"
-                                  onClick={() => toggleStatusDropdown(ticket.id)}
-                                  title="Change status"
-                                >
-                                  <div className="w-2 h-2 rounded-full mr-1" 
-                                    style={{
-                                      backgroundColor: 
-                                        ticket.status === 'open' ? '#3b82f6' : 
-                                        ticket.status === 'in-progress' ? '#eab308' : 
-                                        ticket.status === 'resolved' ? '#22c55e' : 
-                                        '#94a3b8'
-                                    }}
-                                  />
-                                  <ChevronDown className="w-3 h-3" />
-                                </button>
-                                {statusDropdownOpen[ticket.id] && (
-                                  <div className="absolute right-0 mt-1 w-40 glass-morphism rounded-lg shadow-lg overflow-hidden z-10">
-                                    <div className="py-1">
-                                      <button
-                                        className={`flex items-center w-full px-4 py-2 text-sm ${ticket.status === 'open' ? 'text-blue-400' : 'text-slate-300'} hover:bg-white/10`}
-                                        onClick={() => handleStatusChange(ticket.id, 'open')}
-                                      >
-                                        <div className="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
-                                        Open
-                                        {ticket.status === 'open' && <Check className="w-4 h-4 ml-auto" />}
-                                      </button>
-                                      <button
-                                        className={`flex items-center w-full px-4 py-2 text-sm ${ticket.status === 'in-progress' ? 'text-yellow-400' : 'text-slate-300'} hover:bg-white/10`}
-                                        onClick={() => handleStatusChange(ticket.id, 'in-progress')}
-                                      >
-                                        <div className="w-2 h-2 bg-yellow-500 rounded-full mr-2"></div>
-                                        In Progress
-                                        {ticket.status === 'in-progress' && <Check className="w-4 h-4 ml-auto" />}
-                                      </button>
-                                      <button
-                                        className={`flex items-center w-full px-4 py-2 text-sm ${ticket.status === 'resolved' ? 'text-green-400' : 'text-slate-300'} hover:bg-white/10`}
-                                        onClick={() => handleStatusChange(ticket.id, 'resolved')}
-                                      >
-                                        <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
-                                        Resolved
-                                        {ticket.status === 'resolved' && <Check className="w-4 h-4 ml-auto" />}
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
+                              <button 
+                                className="px-3 py-1.5 rounded-lg hover:scale-105 active:scale-95 transition-all flex items-center gap-1.5 text-xs font-medium border shadow-sm"
+                                onClick={() => handleStatusCycle(ticket.id, ticket.status)}
+                                title={`Click to change status: ${ticket.status === 'open' ? 'Open → In Progress' : ticket.status === 'in-progress' ? 'In Progress → Resolved' : 'Resolved → Open'}`}
+                                style={{
+                                  color: 
+                                    ticket.status === 'open' ? '#60a5fa' : 
+                                    ticket.status === 'in-progress' ? '#fbbf24' : 
+                                    ticket.status === 'resolved' ? '#4ade80' : 
+                                    '#94a3b8',
+                                  borderColor:
+                                    ticket.status === 'open' ? '#3b82f6' : 
+                                    ticket.status === 'in-progress' ? '#eab308' : 
+                                    ticket.status === 'resolved' ? '#22c55e' : 
+                                    '#64748b',
+                                  backgroundColor:
+                                    ticket.status === 'open' ? 'rgba(59, 130, 246, 0.1)' : 
+                                    ticket.status === 'in-progress' ? 'rgba(234, 179, 8, 0.1)' : 
+                                    ticket.status === 'resolved' ? 'rgba(34, 197, 94, 0.1)' : 
+                                    'rgba(148, 163, 184, 0.1)'
+                                }}
+                              >
+                                <div className="w-2 h-2 rounded-full" 
+                                  style={{
+                                    backgroundColor: 
+                                      ticket.status === 'open' ? '#3b82f6' : 
+                                      ticket.status === 'in-progress' ? '#eab308' : 
+                                      ticket.status === 'resolved' ? '#22c55e' : 
+                                      '#94a3b8'
+                                  }}
+                                />
+                                <span className="whitespace-nowrap">
+                                  {ticket.status === 'open' ? 'Open' : 
+                                   ticket.status === 'in-progress' ? 'In Progress' : 
+                                   ticket.status === 'resolved' ? 'Resolved' :
+                                   'Closed'}
+                                </span>
+                              </button>
                             )}
                             {/* View, Edit, Comment, Delete - rest of actions */}
                             <button 
@@ -1217,7 +1308,7 @@ const TicketsPage = () => {
       {showDeleteModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
           <div className="glass-morphism rounded-xl w-full max-w-md p-8 text-center">
-            <AlertTriangle className="w-18 h-18 text-red-400 mx-auto mb-4" />
+            <AlertTriangle className="w-12 h-12 text-red-400 mx-auto mb-4" />
             <h3 className="text-xl font-semibold text-white mb-2">Delete Ticket?</h3>
             <p className="text-slate-300 mb-6">Are you sure you want to delete this ticket? This action cannot be undone.</p>
             <div className="flex justify-center space-x-4">

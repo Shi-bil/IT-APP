@@ -37,6 +37,36 @@ const VIEWS = [
   { id: 'discussion', label: 'Discussion', icon: MessageSquare },
 ];
 
+/* ---------- Confirm Delete Modal ---------- */
+
+function ConfirmDeleteModal({ name, onConfirm, onCancel }) {
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+      <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-gradient-to-br from-slate-900 to-slate-950 shadow-2xl p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-xl bg-red-500/20 border border-red-500/30 flex items-center justify-center flex-shrink-0">
+            <Trash2 className="w-5 h-5 text-red-400" />
+          </div>
+          <h2 className="text-base font-semibold text-white">Delete Project</h2>
+        </div>
+        <p className="text-sm text-slate-300 mb-1">
+          Delete <span className="font-semibold text-white">"{name}"</span> and ALL its data?
+        </p>
+        <p className="text-xs text-slate-500 mb-6">This action cannot be undone.</p>
+        <div className="flex justify-end gap-2">
+          <button onClick={onCancel} className="px-4 py-2 text-sm rounded-lg text-slate-300 hover:bg-white/5">
+            Cancel
+          </button>
+          <button onClick={onConfirm}
+            className="px-4 py-2 text-sm rounded-lg bg-red-500 hover:bg-red-600 text-white font-medium transition-colors">
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Modals ---------- */
 
 function CreateProjectModal({ open, onClose, onCreated, users }) {
@@ -232,6 +262,7 @@ function ProjectSettingsModal({ project, allUsers, onClose, onUpdated, onDeleted
     color: project.color,
   });
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const save = async () => {
     setSaving(true);
@@ -243,7 +274,6 @@ function ProjectSettingsModal({ project, allUsers, onClose, onUpdated, onDeleted
     else toast.error(r.error || 'Failed');
   };
   const remove = async () => {
-    if (!confirm(`Delete "${project.name}" and ALL its data?`)) return;
     const r = await projectService.remove(project.id);
     if (r.success) onDeleted();
     else toast.error(r.error || 'Delete failed');
@@ -299,7 +329,7 @@ function ProjectSettingsModal({ project, allUsers, onClose, onUpdated, onDeleted
           </div>
         </div>
         <div className="sticky bottom-0 bg-slate-900/95 flex items-center justify-between p-4 border-t border-white/10">
-          <button onClick={remove} className="px-3 py-2 text-sm rounded-lg text-red-300 hover:bg-red-500/10 flex items-center gap-1.5">
+          <button onClick={() => setConfirmDelete(true)} className="px-3 py-2 text-sm rounded-lg text-red-300 hover:bg-red-500/10 flex items-center gap-1.5">
             <Trash2 className="w-4 h-4" /> Delete
           </button>
           <div className="flex gap-2">
@@ -311,6 +341,13 @@ function ProjectSettingsModal({ project, allUsers, onClose, onUpdated, onDeleted
           </div>
         </div>
       </div>
+      {confirmDelete && (
+        <ConfirmDeleteModal
+          name={project.name}
+          onConfirm={remove}
+          onCancel={() => setConfirmDelete(false)}
+        />
+      )}
     </div>
   );
 }
@@ -766,20 +803,25 @@ export default function ProjectsPage() {
   const hasUnreadDiscussion = (p) => unreadDiscussionCount(p) > 0;
 
   const loadProjects = async ({ silent = false } = {}) => {
-    if (!silent) setLoading(true);
+    if (!silent) {
+      const cp = projectService.peekList();
+      const cs = taskService.peekStats();
+      if (cp?.projects) setProjects(cp.projects);
+      if (cs?.stats) setTaskStats(cs.stats);
+      if (!cp) setLoading(true);
+    }
     const r = await projectService.list();
-    if (r.success) {
-      setProjects(r.projects);
-      const results = await Promise.all(
-        r.projects.map((p) => taskService.list(p.id).then((tr) => ({ pid: p.id, tasks: tr.tasks })))
-      );
-      const stats = {};
-      results.forEach(({ pid, tasks }) => {
-        stats[pid] = { total: tasks.length, done: tasks.filter((t) => t.status === 'done').length };
-      });
-      setTaskStats(stats);
-    } else if (!silent) {
-      toast.error(r.error || 'Failed to load');
+    if (!r.success) {
+      if (!silent) { setLoading(false); toast.error(r.error || 'Failed to load'); }
+      return;
+    }
+    setProjects(r.projects);
+    const ids = r.projects.map((p) => p.id).filter(Boolean);
+    if (ids.length) {
+      const sr = await taskService.getStats(ids);
+      if (sr.success) setTaskStats(sr.stats);
+    } else {
+      setTaskStats({});
     }
     if (!silent) setLoading(false);
   };
@@ -797,20 +839,36 @@ export default function ProjectsPage() {
   }, [isAdmin]);
 
   // Silent auto-refresh: pause when tab hidden, also refresh on visibility return.
-  // Fast cadence so the unread-discussion dot lights up within a few seconds.
+  // BroadcastChannel triggers an immediate refresh when another tab mutates data.
   useEffect(() => {
-    const REFRESH_MS = 6000;
+    const REFRESH_MS = 5000;
     let timer = null;
-    const tick = () => { if (!document.hidden) loadProjects({ silent: true }); };
+    let lastRun = 0;
+    const tick = () => {
+      if (document.hidden) return;
+      const now = Date.now();
+      if (now - lastRun < 2000) return;
+      lastRun = now;
+      loadProjects({ silent: true });
+    };
     const start = () => { if (timer == null) timer = setInterval(tick, REFRESH_MS); };
     const stop = () => { if (timer != null) { clearInterval(timer); timer = null; } };
     const onVis = () => {
       if (document.hidden) stop();
-      else { loadProjects({ silent: true }); start(); }
+      else { tick(); start(); }
     };
     start();
     document.addEventListener('visibilitychange', onVis);
-    return () => { stop(); document.removeEventListener('visibilitychange', onVis); };
+    let bc = null;
+    if (typeof BroadcastChannel !== 'undefined') {
+      bc = new BroadcastChannel('itinventory-sync');
+      bc.onmessage = (e) => { if (e.data?.type === 'invalidate') tick(); };
+    }
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVis);
+      bc?.close();
+    };
   }, []);
 
   const filtered = useMemo(() => {
@@ -850,8 +908,14 @@ export default function ProjectsPage() {
   useEffect(() => {
     if (!selected) { setPaneTasks([]); setSelectedTask(null); return; }
     let alive = true;
-    setPaneLoading(true);
     setSelectedTask(null);
+    const cached = taskService.peekList(selected.id);
+    if (cached?.tasks) {
+      setPaneTasks(cached.tasks);
+      setPaneLoading(false);
+    } else {
+      setPaneLoading(true);
+    }
     taskService.list(selected.id).then((r) => {
       if (!alive) return;
       if (r.success) setPaneTasks(r.tasks);

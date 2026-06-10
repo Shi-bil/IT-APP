@@ -36,6 +36,11 @@ TicketSchema.set('toJSON', {
   }
 });
 
+// Compound indexes for stats aggregation and role-filtered list queries.
+TicketSchema.index({ status: 1, updatedAt: -1 });
+TicketSchema.index({ createdByUserId: 1, status: 1 });
+TicketSchema.index({ assignedToUserId: 1, status: 1 });
+
 export default mongoose.models.Ticket || mongoose.model('Ticket', TicketSchema);
 
 

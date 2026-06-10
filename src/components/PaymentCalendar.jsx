@@ -355,6 +355,7 @@ const PaymentCalendar = ({ vpsItems, onMarkPaid, onUnmarkPaid, onMarkAllPaidForM
                         </div>
                         <p className="text-[10px] sm:text-xs text-slate-400 mt-0.5 truncate">
                           {event.vps.provider || 'No provider'} · {event.vps.billingCycle}
+                          {event.vps.providerAccount ? <span className="text-slate-300"> · {event.vps.providerAccount}</span> : null}
                         </p>
                         <p className={`text-xs sm:text-sm mt-1.5 ${event.paid ? 'text-emerald-300' : 'text-rose-300'}`}>
                           {formatCurrency(event.paid ? (event.payment?.amount ?? event.vps.monthlyCost) : event.vps.monthlyCost, event.vps.currency)}
@@ -443,6 +444,7 @@ const PaymentCalendar = ({ vpsItems, onMarkPaid, onUnmarkPaid, onMarkAllPaidForM
                         </div>
                         <p className="text-[10px] sm:text-xs text-slate-500 mt-0.5 truncate">
                           {event.vps.provider || 'No provider'} · {event.vps.billingCycle}
+                          {event.vps.providerAccount ? <span className="text-slate-300"> · {event.vps.providerAccount}</span> : null}
                         </p>
                       </div>
                       <p className={`text-xs sm:text-sm font-semibold flex-shrink-0 ${event.paid ? 'text-emerald-300' : 'text-rose-300'}`}>

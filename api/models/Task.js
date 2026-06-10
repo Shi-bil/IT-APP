@@ -37,4 +37,10 @@ TaskSchema.set('toJSON', {
   },
 });
 
+// Compound indexes covering the most common list + filter queries.
+// { projectId, status } covers kanban/filter views.
+// { projectId, orderIndex, createdAt } covers sorted task list.
+TaskSchema.index({ projectId: 1, status: 1 });
+TaskSchema.index({ projectId: 1, orderIndex: 1, createdAt: -1 });
+
 export default mongoose.models.Task || mongoose.model('Task', TaskSchema);

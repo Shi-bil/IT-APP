@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Users, Plus, Search, Filter, MoreHorizontal, Edit, Trash2, Eye, Mail, Phone, MapPin, RotateCcw, Package, FolderKanban, FileText, UserCheck, UserPlus, Shield } from 'lucide-react';
 import { userService } from '../services/userService';
 import AllAssetsView from '../components/AllAssetsView';
 import { assetService } from '../services/assetService';
+import useTabRefresh from '../hooks/useTabRefresh';
 
 const UsersPage = () => {
   const [searchParams] = useSearchParams();
@@ -44,6 +45,7 @@ const UsersPage = () => {
   const departmentOptions = [
     { value: 'Business_Development', label: 'Business Development' },
     { value: 'Accounting', label: 'Accounting' },
+    { value: 'AI', label: 'AI' },
     { value: 'Others', label: 'Others' }
   ];
 
@@ -54,19 +56,19 @@ const UsersPage = () => {
     { value: 'admin', label: 'Admin' }
   ];
 
-  useEffect(() => {
-    const fetchUsers = async () => {
-      setLoading(true);
-      const result = await userService.getAllUsers();
-      if (result.success) {
-        console.log('Fetched users:', result.users);
-        console.log('First user structure:', result.users[0]);
-        setUsers(result.users);
-      }
-      setLoading(false);
-    };
-    fetchUsers();
+  const fetchUsers = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    const result = await userService.getAllUsers();
+    if (result.success) {
+      setUsers(result.users);
+    }
+    if (!silent) setLoading(false);
   }, []);
+
+  useEffect(() => { fetchUsers(); }, [fetchUsers]);
+
+  // Real-time sync: poll every 5s (cross-device) + instant when another tab mutates.
+  useTabRefresh(() => fetchUsers(true));
 
   // Update search query from URL params
   useEffect(() => {
@@ -693,10 +695,14 @@ const UsersPage = () => {
               </div>
               <div>
                 <label className="block text-sm text-slate-300 mb-1">Department</label>
-                <input type="text" className="input-field w-full"
+                <select className="input-field w-full"
                   value={editForm.department}
-                  onChange={e => setEditForm(f => ({ ...f, department: e.target.value }))}
-                />
+                  onChange={e => setEditForm(f => ({ ...f, department: e.target.value }))}>
+                  <option value="">Select Department</option>
+                  {departmentOptions.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm text-slate-300 mb-1">Role</label>

@@ -1,33 +1,27 @@
 import axios from 'axios';
+import { readCache, writeCache, invalidatePrefix } from './_cache';
 
-// Module-scoped SWR-style cache. Subsequent navigations to the VPS page (or any
-// other consumer) within TTL_MS get an instant cache hit; mutations invalidate.
-// Pass { force: true } to skip the cache (used by tab-focus refresh).
-const TTL_MS = 30_000;
-let _cache = null;
-let _cachedAt = 0;
+const CACHE_KEY = 'vps:all';
 
-const invalidate = () => {
-  _cache = null;
-  _cachedAt = 0;
-};
+const invalidate = () => invalidatePrefix('vps:');
+
+const authHeaders = () => ({
+  Authorization: `Bearer ${localStorage.getItem('auth_token')}`,
+});
 
 export const vpsService = {
   invalidateCache: invalidate,
+  peekAllVps: () => readCache(CACHE_KEY),
 
   async getAllVps({ force = false } = {}) {
-    const now = Date.now();
-    if (!force && _cache && now - _cachedAt < TTL_MS) {
-      return _cache;
+    if (!force) {
+      const cached = readCache(CACHE_KEY);
+      if (cached) return cached;
     }
     try {
-      const token = localStorage.getItem('auth_token');
-      const res = await axios.get('/api/vps', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await axios.get('/api/vps', { headers: authHeaders() });
       const result = { success: true, vps: res.data.vps || [] };
-      _cache = result;
-      _cachedAt = now;
+      writeCache(CACHE_KEY, result);
       return result;
     } catch (error) {
       return { success: false, error: error.response?.data?.error || error.message, vps: [] };
@@ -35,11 +29,15 @@ export const vpsService = {
   },
 
   async createVps(payload) {
+    const attempt = () => axios.post('/api/vps', payload, { headers: authHeaders(), timeout: 15000 });
     try {
-      const token = localStorage.getItem('auth_token');
-      const res = await axios.post('/api/vps', payload, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      let res;
+      try {
+        res = await attempt();
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        res = await attempt();
+      }
       invalidate();
       return { success: true, vps: res.data.vps };
     } catch (error) {
@@ -48,11 +46,15 @@ export const vpsService = {
   },
 
   async updateVps(id, payload) {
+    const attempt = () => axios.put('/api/vps', { id, ...payload }, { headers: authHeaders(), timeout: 15000 });
     try {
-      const token = localStorage.getItem('auth_token');
-      const res = await axios.put('/api/vps', { id, ...payload }, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      let res;
+      try {
+        res = await attempt();
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        res = await attempt();
+      }
       invalidate();
       return { success: true, vps: res.data.vps };
     } catch (error) {
@@ -82,10 +84,9 @@ export const vpsService = {
 
   async deleteVps(id) {
     try {
-      const token = localStorage.getItem('auth_token');
       await axios.delete('/api/vps', {
         data: { id },
-        headers: { Authorization: `Bearer ${token}` },
+        headers: authHeaders(),
       });
       invalidate();
       return { success: true };

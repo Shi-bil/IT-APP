@@ -4,6 +4,21 @@ import authService from '../services/authService';
 
 const AuthContext = createContext(undefined);
 
+// How often to check whether the token needs refreshing or the account was deactivated.
+// Long enough not to spam the API, short enough to catch role revocations quickly.
+const SESSION_CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
+// Refresh the token when it has fewer than this many days left.
+const REFRESH_THRESHOLD_DAYS = 7;
+
+function getTokenExpiry(token) {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return payload.exp ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
 // Initialize user synchronously from localStorage to avoid flash
 const getInitialUser = () => {
   try {
@@ -23,77 +38,131 @@ export const useAuth = () => {
 };
 
 export const AuthProvider = ({ children }) => {
-  // Initialize with user from localStorage immediately (no loading state needed)
   const [user, setUser] = useState(getInitialUser);
   const [isLoading, setIsLoading] = useState(false);
   const [sessionMessage, setSessionMessage] = useState(null);
   const sessionCheckIntervalRef = useRef(null);
+  // Count consecutive check failures so a single network blip doesn't log out the user.
+  const failureCountRef = useRef(0);
 
-  // Verify session is still valid (optional background check)
   useLayoutEffect(() => {
     const currentUser = authService.getSavedUser();
-    if (currentUser) {
-      setUser(currentUser);
+    if (currentUser) setUser(currentUser);
+  }, []);
+
+  // Silently refresh the token when it's close to expiry.
+  const refreshTokenIfNeeded = useCallback(async () => {
+    const token = localStorage.getItem('auth_token');
+    if (!token) return;
+    const exp = getTokenExpiry(token);
+    if (!exp) return;
+    const thresholdMs = REFRESH_THRESHOLD_DAYS * 24 * 60 * 60 * 1000;
+    if (exp - Date.now() > thresholdMs) return; // still plenty of time left
+
+    try {
+      const res = await axios.post('/api/auth/refresh', {}, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.data?.success && res.data.token) {
+        localStorage.setItem('auth_token', res.data.token);
+      }
+    } catch {
+      // Refresh failing is not fatal — the token is still valid for REFRESH_THRESHOLD_DAYS more days.
     }
   }, []);
 
-  // Function to validate session with backend
+  // Validate the session against the backend. Only force-logout on explicit
+  // account deactivation or privilege revocation — never on network errors.
   const validateSession = useCallback(async () => {
     const token = localStorage.getItem('auth_token');
     if (!token) return;
 
+    // Attempt token refresh in the same pass if needed.
+    await refreshTokenIfNeeded();
+
     try {
       const res = await axios.get('/api/me/validate-session', {
         headers: { Authorization: `Bearer ${token}` },
+        timeout: 10000,
       });
 
+      // Reset failure counter on any successful response.
+      failureCountRef.current = 0;
+
       if (res.data.roleChanged) {
-        // Role changed, force logout with message
         setSessionMessage(res.data.message || 'Your role has been updated. Please log in again.');
         authService.clearSession();
         setUser(null);
       }
     } catch (error) {
-      if (error.response?.status === 401) {
-        const data = error.response.data;
-        if (data.reason === 'demoted') {
-          // User was demoted, force logout with message
-          setSessionMessage(data.message || 'Your admin privileges have been revoked. Please log in again.');
-        } else {
-          setSessionMessage('Your session has expired. Please log in again.');
-        }
-        authService.clearSession();
-        setUser(null);
-      }
-    }
-  }, []);
+      const status = error.response?.status;
+      const data = error.response?.data;
 
-  // Set up periodic session validation (every 5 seconds for quick detection)
-  useEffect(() => {
-    if (user && user.role === 'admin') {
-      // Validate immediately on mount
-      validateSession();
-      
-      // Set up interval for periodic validation
-      sessionCheckIntervalRef.current = setInterval(validateSession, 5000);
-      
-      return () => {
-        if (sessionCheckIntervalRef.current) {
-          clearInterval(sessionCheckIntervalRef.current);
+      // Only log out on explicit account-level rejections (401), not on
+      // server errors (5xx), timeouts, or network failures.
+      if (status === 401) {
+        failureCountRef.current += 1;
+
+        if (data?.reason === 'demoted') {
+          // Explicit privilege revocation — log out immediately.
+          setSessionMessage(data.message || 'Your admin privileges have been revoked. Please log in again.');
+          authService.clearSession();
+          setUser(null);
+          return;
         }
-      };
+
+        // For other 401s (e.g. token truly expired), require 3 consecutive
+        // failures before logging out, guarding against transient API issues.
+        if (failureCountRef.current >= 3) {
+          setSessionMessage('Your session has expired. Please log in again.');
+          authService.clearSession();
+          setUser(null);
+        }
+      }
+      // 5xx, network errors, timeouts → ignore silently.
     }
+  }, [refreshTokenIfNeeded]);
+
+  // Run token refresh on app load, then periodically every 15 minutes.
+  // Applies to ALL authenticated users, not just admins.
+  useEffect(() => {
+    if (!user) {
+      if (sessionCheckIntervalRef.current) {
+        clearInterval(sessionCheckIntervalRef.current);
+        sessionCheckIntervalRef.current = null;
+      }
+      return;
+    }
+
+    // Run immediately so a tab reopen refreshes the token right away.
+    validateSession();
+
+    sessionCheckIntervalRef.current = setInterval(validateSession, SESSION_CHECK_INTERVAL_MS);
+    return () => {
+      if (sessionCheckIntervalRef.current) clearInterval(sessionCheckIntervalRef.current);
+    };
   }, [user, validateSession]);
+
+  // Also refresh token when the tab regains visibility (user returns after a long absence).
+  useEffect(() => {
+    if (!user) return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshTokenIfNeeded();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [user, refreshTokenIfNeeded]);
 
   const login = async (username, password) => {
     try {
       const result = await authService.loginAdmin(username, password);
-    if (result.success) {
+      if (result.success) {
         authService.saveSession(result.token, result.user);
-      setUser(result.user);
-      return true;
-    }
-    return { error: result.error || 'Invalid credentials. Please try again.' };
+        failureCountRef.current = 0;
+        setUser(result.user);
+        return true;
+      }
+      return { error: result.error || 'Invalid credentials. Please try again.' };
     } catch (e) {
       return { error: e.response?.data?.error || e.message || 'Login failed' };
     }
@@ -102,12 +171,13 @@ export const AuthProvider = ({ children }) => {
   const loginAsEmployee = async (email, password) => {
     try {
       const result = await authService.loginEmployee(email, password);
-    if (result.success) {
+      if (result.success) {
         authService.saveSession(result.token, result.user);
-      setUser(result.user);
-      return true;
-    }
-    throw new Error(result.error || 'Login failed');
+        failureCountRef.current = 0;
+        setUser(result.user);
+        return true;
+      }
+      throw new Error(result.error || 'Login failed');
     } catch (e) {
       throw new Error(e.response?.data?.error || e.message || 'Login failed');
     }
@@ -124,13 +194,12 @@ export const AuthProvider = ({ children }) => {
 
   const resendVerificationEmail = async (email) => {
     try {
-      // same as send code
       return await authService.sendVerificationCode(email);
     } catch (e) {
       return { success: false, error: e.response?.data?.error || e.message };
     }
   };
-  
+
   const sendVerificationCode = async (email) => {
     try {
       return await authService.sendVerificationCode(email);
@@ -138,7 +207,7 @@ export const AuthProvider = ({ children }) => {
       return { success: false, error: e.response?.data?.error || e.message };
     }
   };
-  
+
   const verifyEmailWithCode = async (email, code) => {
     try {
       return await authService.verifyEmailWithCode(email, code);
@@ -153,25 +222,16 @@ export const AuthProvider = ({ children }) => {
   };
 
   const resetPassword = async (email) => {
-    // Not implemented yet on new API
     return { success: false, error: 'Not implemented' };
   };
 
-  // Check if user has permission for a specific action or resource
   const hasPermission = (requiredRole) => {
     if (!user) return false;
-    
-    // If no specific role is required, any authenticated user has access
     if (!requiredRole) return true;
-    
-    // Admin has access to everything
     if (user.role === 'admin') return true;
-    
-    // Otherwise, check if user's role matches the required role
     return user.role === requiredRole;
   };
 
-  // Function to clear session message
   const clearSessionMessage = useCallback(() => {
     setSessionMessage(null);
   }, []);

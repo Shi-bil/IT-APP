@@ -45,6 +45,16 @@ export function invalidate(key) {
   }
 }
 
+// BroadcastChannel for instant cross-tab sync. Other tabs listen on this
+// channel and refresh immediately when a mutation invalidates the cache.
+let _bc = null;
+function getBroadcastChannel() {
+  if (!_bc && typeof BroadcastChannel !== 'undefined') {
+    _bc = new BroadcastChannel('itinventory-sync');
+  }
+  return _bc;
+}
+
 export function invalidatePrefix(prefix) {
   try {
     const full = `swr:${VERSION}:${userId()}:${prefix}`;
@@ -52,6 +62,7 @@ export function invalidatePrefix(prefix) {
       const k = localStorage.key(i);
       if (k && k.startsWith(full)) localStorage.removeItem(k);
     }
+    getBroadcastChannel()?.postMessage({ type: 'invalidate', prefix });
   } catch {
     // ignore
   }

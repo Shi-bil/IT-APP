@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import mongoose from 'mongoose';
 import connectToDatabase from '../_db.js';
 import { requireAuth } from '../_auth.js';
 import Task from '../models/Task.js';
@@ -6,7 +7,9 @@ import Project from '../models/Project.js';
 import { sendToUser } from '../notifications/_send.js';
 
 function taskToJSON(t) {
-  const json = t.toJSON();
+  const json = typeof t.toJSON === 'function'
+    ? t.toJSON()
+    : { ...t, id: t._id?.toString(), _id: undefined, __v: undefined };
   if (json.createdByUserId && typeof json.createdByUserId === 'object' && json.createdByUserId.fullname !== undefined) {
     json.createdBy = {
       id: json.createdByUserId._id?.toString() || json.createdByUserId.id,
@@ -32,7 +35,7 @@ function taskToJSON(t) {
 
 async function userCanAccessProject(projectId, auth) {
   if (auth.role === 'admin') return true;
-  const project = await Project.findById(projectId).select('ownerUserId memberUserIds');
+  const project = await Project.findById(projectId).select('ownerUserId memberUserIds').lean();
   if (!project) return false;
   if (String(project.ownerUserId) === String(auth.sub)) return true;
   return (project.memberUserIds || []).some((m) => String(m) === String(auth.sub));
@@ -44,6 +47,49 @@ export default async function handler(req, res) {
   await connectToDatabase();
 
   if (req.method === 'GET') {
+    // Bulk stats fast-path: single aggregation replacing N per-project list calls
+    if (req.query?.stats === 'true') {
+      try {
+        const raw = req.query.projectIds;
+        if (!raw) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ success: false, error: 'projectIds required' }));
+        }
+        const requestedIds = raw.split(',').map((id) => id.trim()).filter(Boolean);
+        let allowedIds = requestedIds;
+        if (auth.role !== 'admin') {
+          const accessible = await Project.find({
+            _id: { $in: requestedIds.map((id) => new mongoose.Types.ObjectId(id)) },
+            $or: [{ ownerUserId: auth.sub }, { memberUserIds: auth.sub }],
+          }).select('_id').lean();
+          allowedIds = accessible.map((p) => String(p._id));
+        }
+        const stats = {};
+        if (allowedIds.length) {
+          const rows = await Task.aggregate([
+            { $match: { projectId: { $in: allowedIds.map((id) => new mongoose.Types.ObjectId(id)) } } },
+            {
+              $group: {
+                _id: '$projectId',
+                total: { $sum: 1 },
+                done: { $sum: { $cond: [{ $eq: ['$status', 'done'] }, 1, 0] } },
+              },
+            },
+          ]);
+          rows.forEach((r) => { stats[String(r._id)] = { total: r.total, done: r.done }; });
+        }
+        allowedIds.forEach((id) => { if (!stats[id]) stats[id] = { total: 0, done: 0 }; });
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'private, max-age=0, stale-while-revalidate=30',
+        });
+        return res.end(JSON.stringify({ success: true, stats }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: false, error: e.message }));
+      }
+    }
+
     try {
       const projectId = req.query?.projectId;
       if (!projectId) throw new Error('projectId required');
@@ -54,9 +100,13 @@ export default async function handler(req, res) {
       const tasks = await Task.find({ projectId })
         .populate('createdByUserId', 'fullname email department')
         .populate('assigneeUserIds', 'fullname email department')
-        .sort({ status: 1, orderIndex: 1, createdAt: -1 });
+        .sort({ status: 1, orderIndex: 1, createdAt: -1 })
+        .lean();
       const data = tasks.map(taskToJSON);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'private, max-age=0, stale-while-revalidate=30',
+      });
       return res.end(JSON.stringify({ success: true, tasks: data }));
     } catch (e) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -87,15 +137,13 @@ export default async function handler(req, res) {
         assigneeUserIds: Array.isArray(body.assigneeUserIds) ? body.assigneeUserIds : [],
         orderIndex: typeof body.orderIndex === 'number' ? body.orderIndex : 0,
       });
-      const populated = await Task.findById(created._id)
-        .populate('createdByUserId', 'fullname email department')
-        .populate('assigneeUserIds', 'fullname email department');
-
-      // Notify everyone "involved":
-      //   - Assignees of this task get the stronger "you were assigned" framing
-      //   - Other project members (owner + memberUserIds) get a generic "new task in project" ping
-      // Removed members (anyone not in memberUserIds at the time of write) are automatically excluded.
-      const project = await Project.findById(body.projectId).select('name ownerUserId memberUserIds');
+      // Fetch populated task + project in parallel — both are needed for the response and notifications.
+      const [populated, project] = await Promise.all([
+        Task.findById(created._id)
+          .populate('createdByUserId', 'fullname email department')
+          .populate('assigneeUserIds', 'fullname email department'),
+        Project.findById(body.projectId).select('name ownerUserId memberUserIds').lean(),
+      ]);
       const projectName = project?.name || 'project';
       const assignees = Array.isArray(body.assigneeUserIds) ? body.assigneeUserIds : [];
       const assigneeIds = new Set(assignees.map(String));

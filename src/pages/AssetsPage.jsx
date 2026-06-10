@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Package, Plus, Search, Filter, MoreHorizontal, Edit, Trash2, Eye, Calendar, Grid3X3, User, Loader2, History, X, ArrowLeft, RotateCcw, FileText, FileSpreadsheet, Zap, Activity, Laptop, Smartphone, Tablet, Signal, Car, Boxes, Network, Upload, AlertTriangle, Download } from 'lucide-react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { assetService } from '../services/assetService';
+import { invalidatePrefix } from '../services/_cache';
 import { exportService } from '../services/exportService';
 import AssignAssetModal from '../components/AssignAssetModal';
 import AssetHistoryList from '../components/AssetHistoryList';
@@ -11,14 +12,17 @@ import { useAuth } from '../contexts/AuthContext';
 import logo from '../assets/logo.png';
 import AllAssetsView from '../components/AllAssetsView';
 import ImportAssetsModal from '../components/ImportAssetsModal';
+import useTabRefresh from '../hooks/useTabRefresh';
 
 const AssetsPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const { user, hasPermission, isLoading: authLoading } = useAuth();
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
-  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [selectedCategory, setSelectedCategory] = useState(() => sessionStorage.getItem('assets_category') || 'all');
   const [selectedStatus, setSelectedStatus] = useState('all');
+  const [selectedSimType, setSelectedSimType] = useState(() => sessionStorage.getItem('assets_simtype') || 'all');
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -39,6 +43,14 @@ const AssetsPage = () => {
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
 
   const isAdmin = user?.role === 'admin';
+
+  useEffect(() => {
+    sessionStorage.setItem('assets_category', selectedCategory);
+  }, [selectedCategory]);
+
+  useEffect(() => {
+    sessionStorage.setItem('assets_simtype', selectedSimType);
+  }, [selectedSimType]);
 
   // Show loading if auth is still loading
   if (authLoading) {
@@ -112,6 +124,18 @@ const AssetsPage = () => {
     }
   }, [isAdmin, user]);
 
+  // Real-time sync: poll every 5s (cross-device) + instant update when
+  // another tab on this browser mutates asset data.
+  useTabRefresh(() => { if (user) fetchAssets(); }, { enabled: !!user });
+
+  // Force-refresh after returning from the edit page
+  useEffect(() => {
+    if (location.state?.fromEdit && user) {
+      invalidatePrefix('assets:');
+      fetchAssets();
+    }
+  }, [location.state?.fromEdit]);
+
   // Update search query from URL params
   useEffect(() => {
     const urlSearch = searchParams.get('search');
@@ -165,11 +189,9 @@ const AssetsPage = () => {
   const handleResetFilters = () => {
     setIsResetting(true);
     setSearchQuery('');
-    if (isAdmin) {
-      setSelectedCategory('all');
-    }
     setSelectedStatus('all');
-    
+    setSelectedSimType('all');
+
     // Reset the animation state after a short delay
     setTimeout(() => {
       setIsResetting(false);
@@ -265,8 +287,11 @@ const AssetsPage = () => {
         (asset.remark?.toLowerCase() || '').includes(q) : 
         true);
       const matchesStatus = selectedStatus === 'all' || asset.status === selectedStatus;
-      
-      return matchesSearch && matchesStatus;
+      const isSim = getCategoryName(asset.categoryId).toLowerCase() === 'sims';
+      const derivedSimType = isSim ? getSimTypeFromPlan(asset.plan, asset.simType) : null;
+      const matchesSimType = selectedSimType === 'all' || !isSim || derivedSimType === selectedSimType;
+
+      return matchesSearch && matchesStatus && matchesSimType;
     })
     .sort((a, b) => {
       // Sort alphabetically by name (case-insensitive)
@@ -727,7 +752,7 @@ const AssetsPage = () => {
               <div className="flex items-center space-x-4">
                 <select
                   value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  onChange={(e) => { setSelectedCategory(e.target.value); setSelectedSimType('all'); }}
                   className="input-field bg-slate-800/50 border border-slate-700/50 focus:border-cyan-500/50 focus:ring focus:ring-cyan-500/20 transition-all duration-300"
                 >
                   <option value="all">All Categories</option>
@@ -746,6 +771,17 @@ const AssetsPage = () => {
                   <option value="maintenance">Maintenance</option>
                   <option value="retired">Retired</option>
                 </select>
+                {selectedCategory === '4' && (
+                  <select
+                    value={selectedSimType}
+                    onChange={(e) => setSelectedSimType(e.target.value)}
+                    className="input-field bg-slate-800/50 border border-slate-700/50 focus:border-cyan-500/50 focus:ring focus:ring-cyan-500/20 transition-all duration-300"
+                  >
+                    <option value="all">All Types</option>
+                    <option value="postpaid">Postpaid</option>
+                    <option value="prepaid">Prepaid</option>
+                  </select>
+                )}
                 <button 
                   className={`btn-secondary backdrop-blur-sm hover:scale-105 transition-all flex items-center space-x-2 bg-gradient-to-r from-slate-700/50 to-slate-800/50 border border-slate-700/50 ${isResetting ? 'animate-pulse' : ''}`}
                   onClick={handleResetFilters}

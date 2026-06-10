@@ -111,6 +111,7 @@ const RegistrationSystem = () => {
   const departments = [
     { value: 'Business_Development', label: 'Business Development' },
     { value: 'Accounting', label: 'Accounting' },
+    { value: 'AI', label: 'AI' },
     { value: 'Others', label: 'Others' }
   ];
 

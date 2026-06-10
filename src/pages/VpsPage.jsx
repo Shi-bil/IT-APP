@@ -231,7 +231,11 @@ const VpsPage = () => {
   }, [vpsList]);
 
   const loadVps = async ({ force = false, silent = false } = {}) => {
-    if (!silent) setLoading(true);
+    if (!silent) {
+      const cached = vpsService.peekAllVps();
+      if (cached?.vps) { setVpsList(cached.vps); setError(''); }
+      if (!cached) setLoading(true);
+    }
     const result = await vpsService.getAllVps({ force });
     if (result.success) {
       setVpsList(result.vps);

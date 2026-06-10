@@ -31,4 +31,7 @@ ProjectCommentSchema.set('toJSON', {
   },
 });
 
+// Compound index covering the most common thread fetch: projectId + taskId + sort.
+ProjectCommentSchema.index({ projectId: 1, taskId: 1, createdAt: 1 });
+
 export default mongoose.models.ProjectComment || mongoose.model('ProjectComment', ProjectCommentSchema);

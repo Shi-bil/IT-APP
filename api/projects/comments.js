@@ -7,7 +7,9 @@ import Task from '../models/Task.js';
 import { sendToUser } from '../notifications/_send.js';
 
 function commentToJSON(c) {
-  const json = c.toJSON();
+  const json = typeof c.toJSON === 'function'
+    ? c.toJSON()
+    : { ...c, id: c._id?.toString(), _id: undefined, __v: undefined };
   if (json.createdByUserId && typeof json.createdByUserId === 'object' && json.createdByUserId.fullname !== undefined) {
     json.createdBy = {
       id: json.createdByUserId._id?.toString() || json.createdByUserId.id,
@@ -25,7 +27,7 @@ function commentToJSON(c) {
 
 async function canAccessProject(projectId, auth) {
   if (auth.role === 'admin') return true;
-  const project = await Project.findById(projectId).select('ownerUserId memberUserIds');
+  const project = await Project.findById(projectId).select('ownerUserId memberUserIds').lean();
   if (!project) return false;
   if (String(project.ownerUserId) === String(auth.sub)) return true;
   return (project.memberUserIds || []).some((m) => String(m) === String(auth.sub));
@@ -55,7 +57,8 @@ export default async function handler(req, res) {
       else filter.taskId = null;
       const comments = await ProjectComment.find(filter)
         .populate('createdByUserId', 'fullname email department')
-        .sort({ createdAt: 1 });
+        .sort({ createdAt: 1 })
+        .lean();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ success: true, comments: comments.map(commentToJSON) }));
     } catch (e) {
@@ -87,10 +90,16 @@ export default async function handler(req, res) {
         mentions: Array.isArray(mentions) ? mentions : [],
         createdByUserId: auth.sub,
       });
-      const populated = await ProjectComment.findById(created._id).populate(
-        'createdByUserId',
-        'fullname email department'
-      );
+
+      // Fetch populated comment + parent (for reply notifications) + project + task in parallel.
+      const [populated, parent, project, task] = await Promise.all([
+        ProjectComment.findById(created._id).populate('createdByUserId', 'fullname email department'),
+        parentCommentId
+          ? ProjectComment.findById(parentCommentId).select('createdByUserId').lean()
+          : Promise.resolve(null),
+        Project.findById(scopedProjectId).select('name ownerUserId memberUserIds').lean(),
+        taskId ? Task.findById(taskId).select('assigneeUserIds createdByUserId').lean() : Promise.resolve(null),
+      ]);
 
       // Build the "everyone involved" recipient set.
       // Mentioned users get a stronger "@you" framing; everyone else gets a generic "new comment" ping.
@@ -98,11 +107,8 @@ export default async function handler(req, res) {
       (Array.isArray(mentions) ? mentions : []).forEach((u) => {
         if (String(u) !== String(auth.sub)) mentionRecipientIds.add(String(u));
       });
-      if (parentCommentId) {
-        const parent = await ProjectComment.findById(parentCommentId).select('createdByUserId');
-        if (parent && String(parent.createdByUserId) !== String(auth.sub)) {
-          mentionRecipientIds.add(String(parent.createdByUserId));
-        }
+      if (parent && String(parent.createdByUserId) !== String(auth.sub)) {
+        mentionRecipientIds.add(String(parent.createdByUserId));
       }
 
       const involvedRecipientIds = new Set();
@@ -110,24 +116,20 @@ export default async function handler(req, res) {
         if (!uid) return;
         const id = String(uid);
         if (id === String(auth.sub)) return;
-        if (mentionRecipientIds.has(id)) return; // mentioned users already covered with stronger framing
+        if (mentionRecipientIds.has(id)) return;
         involvedRecipientIds.add(id);
       };
 
       // Always: project members + project owner
-      const project = await Project.findById(scopedProjectId).select('name ownerUserId memberUserIds');
       if (project) {
         addInvolved(project.ownerUserId);
         (project.memberUserIds || []).forEach(addInvolved);
       }
 
       // If this is a comment on a task: also the task assignees + task creator
-      if (taskId) {
-        const task = await Task.findById(taskId).select('assigneeUserIds createdByUserId');
-        if (task) {
-          (task.assigneeUserIds || []).forEach(addInvolved);
-          addInvolved(task.createdByUserId);
-        }
+      if (task) {
+        (task.assigneeUserIds || []).forEach(addInvolved);
+        addInvolved(task.createdByUserId);
       }
 
       // Thread participants — anyone who has commented in this same scope before (task thread, or project discussion)

@@ -7,9 +7,9 @@ import Project from '../models/Project.js';
 
 async function canAccessTask(taskId, auth) {
   if (auth.role === 'admin') return true;
-  const task = await Task.findById(taskId).select('projectId');
+  const task = await Task.findById(taskId).select('projectId').lean();
   if (!task) return false;
-  const project = await Project.findById(task.projectId).select('ownerUserId memberUserIds');
+  const project = await Project.findById(task.projectId).select('ownerUserId memberUserIds').lean();
   if (!project) return false;
   if (String(project.ownerUserId) === String(auth.sub)) return true;
   return (project.memberUserIds || []).some((m) => String(m) === String(auth.sub));
@@ -28,9 +28,12 @@ export default async function handler(req, res) {
         res.writeHead(403, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ success: false, error: 'Forbidden' }));
       }
-      const subtasks = await Subtask.find({ taskId }).sort({ orderIndex: 1, createdAt: 1 });
+      const subtasks = await Subtask.find({ taskId }).sort({ orderIndex: 1, createdAt: 1 }).lean();
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ success: true, subtasks: subtasks.map((s) => s.toJSON()) }));
+      return res.end(JSON.stringify({
+        success: true,
+        subtasks: subtasks.map((s) => ({ ...s, id: s._id.toString(), _id: undefined, __v: undefined })),
+      }));
     } catch (e) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ success: false, error: e.message }));

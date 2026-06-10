@@ -64,7 +64,7 @@ export default async function handler(req, res) {
         role: user.role,
       },
       process.env.JWT_SECRET || 'dev-secret',
-      { expiresIn: '7d' }
+      { expiresIn: '30d' }
     );
 
     // Update last login

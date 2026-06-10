@@ -164,7 +164,7 @@ const AssetForm = () => {
       }
       
       if (result.success) {
-        navigate('/assets');
+        navigate('/assets', { state: { fromEdit: true } });
       } else {
         setError(result.error || 'Failed to save asset. Please try again.');
       }
@@ -175,7 +175,7 @@ const AssetForm = () => {
     }
   };
 
-  const goBack = () => navigate(-1);
+  const goBack = () => navigate('/assets', { state: { fromEdit: true } });
 
   if (loading && isEditing) {
     return (
@@ -411,7 +411,7 @@ const AssetForm = () => {
           onClose={() => setShowImportModal(false)}
           onImportComplete={() => {
             setShowImportModal(false);
-            navigate('/assets');
+            navigate('/assets', { state: { fromEdit: true } });
           }}
           categories={categories}
         />

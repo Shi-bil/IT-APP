@@ -60,10 +60,8 @@ const BreakdownColumn = ({ label, accent, events, emptyMessage, onMarkPaid, onUn
                     </div>
                     <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 truncate">
                       {item.provider || 'No provider'} · {item.billingCycle || 'Monthly'}
+                      {item.providerAccount ? <span className="text-slate-300"> · {item.providerAccount}</span> : null}
                     </p>
-                    {item.providerAccount ? (
-                      <p className="text-[10px] text-slate-500 mt-0.5 truncate">{item.providerAccount}</p>
-                    ) : null}
                     {payment?.note ? (
                       <p className="text-[10px] text-emerald-300/80 mt-0.5 truncate">{payment.note}</p>
                     ) : null}

@@ -39,6 +39,9 @@ AssetSchema.set('toJSON', {
   }
 });
 
+// Compound index for the admin list view which sorts by createdAt and filters by status.
+AssetSchema.index({ status: 1, createdAt: -1 });
+
 export default mongoose.models.Asset || mongoose.model('Asset', AssetSchema);
 
 

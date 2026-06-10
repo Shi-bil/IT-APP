@@ -18,6 +18,26 @@ function normalizeAndSortPayments(payments = []) {
     .sort((a, b) => new Date(b.paidAt) - new Date(a.paidAt));
 }
 
+// Used for list-view GET: accepts a plain lean object, omits decrypt so
+// passwords are never sent to the list page (they are not shown there).
+function withComputedFieldsLean(doc) {
+  const id = doc._id?.toString() || doc.id;
+  const payments = normalizeAndSortPayments(doc.payments || []);
+  const totalPaid = payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const { _id, __v, password, providerAccount, ...rest } = doc;
+  return {
+    ...rest,
+    id,
+    password: '',
+    providerAccount: '',
+    payments,
+    totalPaid,
+    paymentCount: payments.length,
+    nextPaymentDate: doc.nextPaymentDate ? new Date(doc.nextPaymentDate) : null,
+    recurrenceEndDate: doc.recurrenceEndDate ? new Date(doc.recurrenceEndDate) : null,
+  };
+}
+
 function withComputedFields(vpsDoc) {
   const json = vpsDoc.toJSON();
   const payments = normalizeAndSortPayments(json.payments || []);
@@ -67,9 +87,12 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
     try {
-      const docs = await Vps.find({}).sort({ createdAt: -1 });
-      const items = docs.map((doc) => withComputedFields(doc));
-      res.writeHead(200, { 'Content-Type': 'application/json' });
+      const docs = await Vps.find({}).sort({ createdAt: -1 }).lean();
+      const items = docs.map((doc) => withComputedFieldsLean(doc));
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'private, max-age=0, stale-while-revalidate=30',
+      });
       return res.end(JSON.stringify({ success: true, vps: items }));
     } catch (error) {
       console.error('VPS GET error:', error);

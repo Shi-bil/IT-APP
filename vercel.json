@@ -1,4 +1,10 @@
 {
+    "crons": [
+      {
+        "path": "/api/cron/payment-reminder",
+        "schedule": "0 14 * * *"
+      }
+    ],
     "rewrites": [
       {
         "source": "/api/:path*",

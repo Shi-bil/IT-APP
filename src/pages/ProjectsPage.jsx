@@ -749,6 +749,10 @@ export default function ProjectsPage() {
   const [paneTasks, setPaneTasks] = useState([]);
   const [paneLoading, setPaneLoading] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
+  // Timestamp of the last optimistic task update. Any network task-list response
+  // that was fetched BEFORE this timestamp is stale and must be dropped — otherwise
+  // it overwrites the optimistic state and causes a visible flicker.
+  const lastOptimisticAt = React.useRef(0);
 
   // Per-user, per-project last-read state for the discussion view.
   // Stored in localStorage so the unread badge persists across reloads.
@@ -817,12 +821,19 @@ export default function ProjectsPage() {
     }
     setProjects(r.projects);
     const ids = r.projects.map((p) => p.id).filter(Boolean);
-    if (ids.length) {
-      const sr = await taskService.getStats(ids);
-      if (sr.success) setTaskStats(sr.stats);
-    } else {
-      setTaskStats({});
-    }
+    if (!ids.length) { setTaskStats({}); if (!silent) setLoading(false); return; }
+
+    // On initial load, prefetch tasks for the project that will be selected so
+    // the task pane renders instantly without a spinner. Use the URL project if
+    // already set, otherwise the first in the list (the auto-select target).
+    // Skip during silent background refreshes — the task-loading effect handles
+    // its own refresh and we don't want stale closure issues from the interval.
+    const prefetchId = silent ? null : (ids.includes(urlProjectId) ? urlProjectId : ids[0]);
+    const [sr] = await Promise.all([
+      taskService.getStats(ids),
+      prefetchId ? taskService.list(prefetchId) : Promise.resolve(null),
+    ]);
+    if (sr.success) setTaskStats(sr.stats);
     if (!silent) setLoading(false);
   };
 
@@ -897,7 +908,10 @@ export default function ProjectsPage() {
     const REFRESH_MS = 20000;
     const tick = async () => {
       if (document.hidden) return;
+      const reqTime = Date.now();
       const r = await taskService.list(selected.id);
+      // Drop response if an optimistic update happened after this request started.
+      if (lastOptimisticAt.current > reqTime) return;
       if (r.success) setPaneTasks(r.tasks);
     };
     const timer = setInterval(tick, REFRESH_MS);
@@ -916,8 +930,11 @@ export default function ProjectsPage() {
     } else {
       setPaneLoading(true);
     }
+    const reqTime = Date.now();
     taskService.list(selected.id).then((r) => {
       if (!alive) return;
+      // Drop response if an optimistic update happened after this request started.
+      if (lastOptimisticAt.current > reqTime) return;
       if (r.success) setPaneTasks(r.tasks);
       setPaneLoading(false);
     });
@@ -932,6 +949,7 @@ export default function ProjectsPage() {
   }, [selected]);
 
   const handleTaskUpdated = (u) => {
+    lastOptimisticAt.current = Date.now();
     setPaneTasks((arr) => arr.map((t) => (t.id === u.id ? u : t)));
     setSelectedTask((d) => (d && d.id === u.id ? u : d));
     // Refresh project stats

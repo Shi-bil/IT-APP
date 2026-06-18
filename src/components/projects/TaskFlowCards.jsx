@@ -110,15 +110,32 @@ export default function TaskFlowCards({ task, projectMembers, projectId, project
     }
   }, [task?.id]);
 
+  // Keep status and progress in sync with the task prop when they change externally
+  // (e.g. mark-complete from the board card updates the parent but draft only resets on id change).
+  // Only status/progress are patched — text fields are left alone to avoid interrupting edits.
+  useEffect(() => {
+    if (!task) return;
+    setDraft((d) => ({ ...d, status: task.status, progress: task.progress }));
+  }, [task?.status, task?.progress]);
+
   if (!task) return null;
 
   const saveField = async (field, value) => {
+    const prev = draft[field];
     setDraft((d) => ({ ...d, [field]: value }));
+    // Optimistic: notify parent immediately so the board column updates at once.
+    onUpdated({ ...task, ...draft, [field]: value });
     setSaving(true);
     const res = await taskService.update(task.id, { [field]: value });
     setSaving(false);
-    if (res.success) onUpdated(res.task);
-    else toast.error(res.error || 'Update failed');
+    if (res.success) {
+      onUpdated(res.task);
+    } else {
+      // Rollback local draft and parent state.
+      setDraft((d) => ({ ...d, [field]: prev }));
+      onUpdated(task);
+      toast.error(res.error || 'Update failed');
+    }
   };
 
   const toggleAssignee = async (uid) => {
@@ -401,10 +418,12 @@ export default function TaskFlowCards({ task, projectMembers, projectId, project
           {isDone && canReopen && (
             <button type="button"
               onClick={async () => {
-                setDraft((d) => ({ ...d, progress: 75, status: 'in-progress' }));
-                const r = await taskService.update(task.id, { progress: 75, status: 'in-progress' });
+                const next = { progress: 75, status: 'in-progress' };
+                setDraft((d) => ({ ...d, ...next }));
+                onUpdated({ ...task, ...draft, ...next });
+                const r = await taskService.update(task.id, next);
                 if (r.success) onUpdated(r.task);
-                else toast.error(r.error || 'Failed');
+                else { setDraft((d) => ({ ...d, ...task })); onUpdated(task); toast.error(r.error || 'Failed'); }
               }}
               className="w-full px-3 py-2 text-xs rounded-lg bg-slate-800/60 border border-white/10 text-slate-300 hover:bg-slate-700 flex items-center justify-center gap-1.5">
               <RotateCcw className="w-3.5 h-3.5" /> Reopen Task
@@ -413,10 +432,12 @@ export default function TaskFlowCards({ task, projectMembers, projectId, project
           {!isDone && canMarkDone && (
             <button type="button"
               onClick={async () => {
-                setDraft((d) => ({ ...d, progress: 100, status: 'done' }));
-                const r = await taskService.update(task.id, { progress: 100, status: 'done' });
+                const next = { progress: 100, status: 'done' };
+                setDraft((d) => ({ ...d, ...next }));
+                onUpdated({ ...task, ...draft, ...next });
+                const r = await taskService.update(task.id, next);
                 if (r.success) { onUpdated(r.task); toast.success('Marked complete'); }
-                else toast.error(r.error || 'Failed');
+                else { setDraft((d) => ({ ...d, ...task })); onUpdated(task); toast.error(r.error || 'Failed'); }
               }}
               className="w-full px-3 py-2.5 text-sm rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold flex items-center justify-center gap-2 shadow-[0_0_18px_-3px_rgba(16,185,129,0.6)]">
               <Check className="w-4 h-4" strokeWidth={3} /> {inReview ? 'Approve & Mark Complete' : 'Mark Complete'}

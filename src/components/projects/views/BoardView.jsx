@@ -247,9 +247,15 @@ export default function BoardView({
     if (!taskId) return;
     const task = tasks.find((t) => t.id === taskId);
     if (!task || task.status === colId) return;
+    // Optimistic: move the card to the new column immediately.
+    onTaskUpdated({ ...task, status: colId });
     const res = await taskService.update(taskId, { status: colId });
-    if (res.success) onTaskUpdated(res.task);
-    else toast.error(res.error || 'Failed to move');
+    if (res.success) {
+      onTaskUpdated(res.task);
+    } else {
+      onTaskUpdated(task); // rollback
+      toast.error(res.error || 'Failed to move');
+    }
   };
 
   return (

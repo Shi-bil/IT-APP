@@ -37,12 +37,17 @@ export default function MarkCompleteButton({ task, onUpdated, size = 'md', stopP
     const next = done
       ? { status: 'in-progress', progress: 75 }
       : { status: 'done', progress: 100 };
+    // Optimistic: move immediately so the board reflects the change at once.
+    onUpdated?.({ ...task, ...next });
     const res = await taskService.update(task.id, next);
     setBusy(false);
     if (res.success) {
+      // Replace optimistic state with the server's authoritative response.
       onUpdated?.(res.task);
       toast.success(done ? 'Reopened' : 'Marked complete', { duration: 1500 });
     } else {
+      // Rollback to original task on failure.
+      onUpdated?.(task);
       toast.error(res.error || 'Failed to update');
     }
   };

@@ -87,8 +87,8 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
     try {
-      const docs = await Vps.find({}).sort({ createdAt: -1 }).lean();
-      const items = docs.map((doc) => withComputedFieldsLean(doc));
+      const docs = await Vps.find({}).sort({ createdAt: -1 });
+      const items = docs.map((doc) => withComputedFields(doc));
       res.writeHead(200, {
         'Content-Type': 'application/json',
         'Cache-Control': 'private, max-age=0, stale-while-revalidate=30',

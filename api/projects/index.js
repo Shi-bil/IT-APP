@@ -47,20 +47,17 @@ export default async function handler(req, res) {
       if (mine || auth.role !== 'admin') {
         filter.$or = [{ ownerUserId: auth.sub }, { memberUserIds: auth.sub }];
       }
-      const projects = await Project.find(filter)
-        .populate('ownerUserId', 'fullname email department')
-        .populate('memberUserIds', 'fullname email department')
-        .sort({ createdAt: -1 })
-        .lean();
-      const data = projects.map(projectToJSON);
-
-      // Annotate each project with the latest project-discussion comment
-      // (taskId=null) timestamp, author, and total count so the client can
-      // render an unread badge with a number.
-      if (data.length) {
-        const projectIds = projects.map((p) => p._id);
-        const latest = await ProjectComment.aggregate([
-          { $match: { projectId: { $in: projectIds }, taskId: null } },
+      // Run project fetch and discussion-comment aggregate in parallel.
+      // The aggregate scans all taskId=null comments; the JS join below keeps
+      // only entries matching the returned project IDs.
+      const [projects, latestComments] = await Promise.all([
+        Project.find(filter)
+          .populate('ownerUserId', 'fullname email department')
+          .populate('memberUserIds', 'fullname email department')
+          .sort({ createdAt: -1 })
+          .lean(),
+        ProjectComment.aggregate([
+          { $match: { taskId: null } },
           { $sort: { createdAt: -1 } },
           {
             $group: {
@@ -70,8 +67,20 @@ export default async function handler(req, res) {
               count: { $sum: 1 },
             },
           },
-        ]);
-        const byPid = new Map(latest.map((l) => [String(l._id), l]));
+        ]),
+      ]);
+      const data = projects.map(projectToJSON);
+
+      // Annotate each project with the latest project-discussion comment
+      // (taskId=null) timestamp, author, and total count so the client can
+      // render an unread badge with a number.
+      if (data.length) {
+        const projectIdSet = new Set(projects.map((p) => String(p._id)));
+        const byPid = new Map(
+          latestComments
+            .filter((l) => projectIdSet.has(String(l._id)))
+            .map((l) => [String(l._id), l])
+        );
         data.forEach((p) => {
           const hit = byPid.get(String(p.id || p._id));
           p.latestDiscussionAt = hit ? hit.latestAt : null;
